@@ -222,6 +222,94 @@ func newLiveItem(w Window, r LiveRun) LiveItem {
 	return it
 }
 
+// RunItem is one row of a case list: where the run ended up and why.
+type RunItem struct {
+	RunID            string  `json:"run_id"`
+	TicketID         *int64  `json:"ticket_id"`
+	TicketNo         string  `json:"ticket_no"`
+	CpeID            string  `json:"cpe_id"`
+	Township         string  `json:"township"`
+	CurrentState     string  `json:"current_state"`
+	Bucket           string  `json:"bucket"`
+	BeforeQueue      string  `json:"before_queue"`
+	TargetQueue      string  `json:"target_queue"`
+	HTTPStatus       *int64  `json:"http_status"`
+	IsRemoteResolved *bool   `json:"is_remote_resolved"`
+	IsBCSSuccess     *bool   `json:"is_bcs_success"`
+	BCSStatusMessage string  `json:"bcs_status_message"` // CPEMS/BCS error when is_bcs_success is false
+	Reason           string  `json:"reason"`
+	StartedAt        string  `json:"started_at"`
+	CompletedAt      *string `json:"completed_at"`
+	DurationSec      *int64  `json:"duration_sec"`
+}
+
+type CaseResponse struct {
+	GeneratedAt string    `json:"generated_at"`
+	Case        Case      `json:"case"`
+	Total       int       `json:"total"`
+	Limit       int       `json:"limit"`
+	Items       []RunItem `json:"items"`
+}
+
+func newRunItem(r ExportRun) RunItem {
+	it := RunItem{
+		RunID:            r.RunID,
+		TicketNo:         r.TicketNo.String,
+		CpeID:            r.CpeID.String,
+		Township:         r.Township.String,
+		CurrentState:     r.State,
+		Bucket:           bucket(r.State, r.CompletedAt.Valid, r.HTTPStatus.Int64),
+		BeforeQueue:      r.BeforeQueue.String,
+		TargetQueue:      r.TargetQueue.String,
+		BCSStatusMessage: r.BCSStatusMessage.String,
+		Reason:           r.LastStateReason.String,
+		StartedAt:        r.CreatedAt.Format(wireTime),
+	}
+	if r.TicketID.Valid {
+		it.TicketID = &r.TicketID.Int64
+	}
+	if r.HTTPStatus.Valid {
+		it.HTTPStatus = &r.HTTPStatus.Int64
+	}
+	if r.IsRemoteResolved.Valid {
+		it.IsRemoteResolved = &r.IsRemoteResolved.Bool
+	}
+	if r.IsBCSSuccess.Valid {
+		it.IsBCSSuccess = &r.IsBCSSuccess.Bool
+	}
+	if r.CompletedAt.Valid {
+		s := r.CompletedAt.Time.Format(wireTime)
+		d := seconds(r.CompletedAt.Time.Sub(r.CreatedAt))
+		it.CompletedAt, it.DurationSec = &s, &d
+	}
+	return it
+}
+
+// caseTotal is the card number a case list opens from.
+func caseTotal(r SummaryResponse, c Case) int {
+	switch c {
+	case CaseReceived:
+		return r.Received
+	case CaseSuccess:
+		return r.Success.Total
+	case CaseRemoteResolved:
+		return r.Success.RemoteResolved
+	case CaseTransferred:
+		return r.Success.Transferred
+	case CaseKeptInNOC:
+		return r.Success.KeptInNOC
+	case CaseBCSOK:
+		return r.Success.BCSOK
+	case CaseBCSFailed:
+		return r.Success.BCSFailed
+	case CaseNotEligible:
+		return r.NotEligible
+	case CaseManualCheck:
+		return r.ManualCheck
+	}
+	return r.InProgress.Total
+}
+
 func seconds(d time.Duration) int64 {
 	if d < 0 {
 		return 0

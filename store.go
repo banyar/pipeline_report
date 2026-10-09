@@ -21,6 +21,24 @@ const finishedStates = `'COMPLETED','SKIPPED','CONSUME_VALIDATION_FAILED','FAILE
 // without updating this report.
 const classifiedTerminal = finishedStates + `,'NOT_ELIGIBLE','ALREADY_PROCESSED','API_REJECTED','API_UNREACHABLE'`
 
+// Card conditions on pipeline_runs pr. The summary counts and the case lists
+// both use these, so a card's number and the list it opens cannot disagree.
+// The kept-in-NOC ones take the NOC queue name twice.
+const (
+	condSuccess     = `pr.current_state = 'COMPLETED'`
+	condRemote      = condSuccess + ` AND pr.is_remote_resolved = 1`
+	condNotRemote   = condSuccess + ` AND COALESCE(pr.is_remote_resolved, 0) = 0`
+	condInNOC       = `TRIM(pr.before_queue) = ? AND TRIM(pr.target_queue) = ?`
+	condKeptInNOC   = condNotRemote + ` AND ` + condInNOC
+	condTransferred = condNotRemote + ` AND NOT COALESCE(` + condInNOC + `, FALSE)`
+	condBCSOK       = condRemote + ` AND pr.is_bcs_success = 1`
+	condBCSFailed   = condRemote + ` AND pr.is_bcs_success = 0`
+	condNotEligible = `pr.current_state IN ('NOT_ELIGIBLE','ALREADY_PROCESSED')`
+	// Validation failed + API error + failed, whatever the http_status.
+	condManualCheck = `pr.current_state IN ('API_REJECTED','API_UNREACHABLE','CONSUME_VALIDATION_FAILED',
+	                   'FAILED_PERMANENT','NORMALIZE_FAILED','CPE_NOT_FOUND','RT_UPDATE_FAILED')`
+)
+
 // Window is "today" plus the instant every count and age is measured at, so
 // the summary and the live list of one refresh agree with each other.
 type Window struct {
@@ -109,19 +127,18 @@ const rejectedStatus = `
 const summaryQuery = `
 SELECT
   COUNT(*),
-  COALESCE(SUM(pr.current_state IN ('NOT_ELIGIBLE','ALREADY_PROCESSED')), 0),
+  COALESCE(SUM(` + condNotEligible + `), 0),
   COALESCE(SUM(pr.completed_at IS NULL), 0),
   COALESCE(SUM(pr.completed_at IS NULL AND pr.current_state IN (` + retryStates + `)), 0),
   COALESCE(SUM(pr.completed_at IS NULL
            AND COALESCE(pr.current_state, '') NOT IN (` + retryStates + `)
            AND COALESCE(pr.updated_at, pr.created_at) < ?), 0),
-  COALESCE(SUM(pr.current_state = 'COMPLETED'), 0),
-  COALESCE(SUM(pr.current_state = 'COMPLETED' AND pr.is_remote_resolved = 1), 0),
-  COALESCE(SUM(pr.current_state = 'COMPLETED' AND COALESCE(pr.is_remote_resolved, 0) = 0), 0),
-  COALESCE(SUM(pr.current_state = 'COMPLETED' AND COALESCE(pr.is_remote_resolved, 0) = 0
-           AND TRIM(pr.before_queue) = ? AND TRIM(pr.target_queue) = ?), 0),
-  COALESCE(SUM(pr.current_state = 'COMPLETED' AND pr.is_remote_resolved = 1 AND pr.is_bcs_success = 1), 0),
-  COALESCE(SUM(pr.current_state = 'COMPLETED' AND pr.is_remote_resolved = 1 AND pr.is_bcs_success = 0), 0),
+  COALESCE(SUM(` + condSuccess + `), 0),
+  COALESCE(SUM(` + condRemote + `), 0),
+  COALESCE(SUM(` + condNotRemote + `), 0),
+  COALESCE(SUM(` + condKeptInNOC + `), 0),
+  COALESCE(SUM(` + condBCSOK + `), 0),
+  COALESCE(SUM(` + condBCSFailed + `), 0),
   COALESCE(SUM(pr.current_state IN (` + finishedStates + `)), 0),
   COALESCE(SUM(pr.current_state = 'API_REJECTED' AND rej.http_status = 400), 0),
   COALESCE(SUM(pr.current_state = 'CONSUME_VALIDATION_FAILED'), 0),
@@ -187,16 +204,22 @@ type LiveRun struct {
 	NextRetryAt  sql.NullTime
 }
 
-func queryInProgress(ctx context.Context, q querier, w Window, f Filter, limit int) ([]LiveRun, error) {
-	where := `pr.created_at >= ? AND pr.created_at < ? AND pr.completed_at IS NULL`
-	args := []any{w.Start, w.End}
+// inProgressCond is the condition of one "In progress now" tab.
+func inProgressCond(w Window, f Filter) (string, []any) {
 	switch f {
 	case FilterRetrying:
-		where += ` AND pr.current_state IN (` + retryStates + `)`
+		return `pr.completed_at IS NULL AND pr.current_state IN (` + retryStates + `)`, nil
 	case FilterStuck:
-		where += ` AND COALESCE(pr.current_state, '') NOT IN (` + retryStates + `) AND COALESCE(pr.updated_at, pr.created_at) < ?`
-		args = append(args, w.StuckBefore)
+		return `pr.completed_at IS NULL AND COALESCE(pr.current_state, '') NOT IN (` + retryStates + `)
+		        AND COALESCE(pr.updated_at, pr.created_at) < ?`, []any{w.StuckBefore}
 	}
+	return `pr.completed_at IS NULL`, nil
+}
+
+func queryInProgress(ctx context.Context, q querier, w Window, f Filter, limit int) ([]LiveRun, error) {
+	cond, condArgs := inProgressCond(w, f)
+	where := `pr.created_at >= ? AND pr.created_at < ? AND ` + cond
+	args := append([]any{w.Start, w.End}, condArgs...)
 	query := `
 SELECT pr.run_id, pr.ticket_id, pr.ticket_no, pr.cpe_id, pr.township, COALESCE(pr.current_state, ''),
        pr.created_at, COALESCE(pr.updated_at, pr.created_at),
@@ -237,33 +260,127 @@ type ExportRun struct {
 	HTTPStatus       sql.NullInt64
 	IsRemoteResolved sql.NullBool
 	IsBCSSuccess     sql.NullBool
+	BCSStatusMessage sql.NullString
 	LastStateReason  sql.NullString
 	CreatedAt        time.Time
 	UpdatedAt        sql.NullTime
 	CompletedAt      sql.NullTime
 }
 
-func queryTodayRuns(ctx context.Context, q querier, w Window) ([]ExportRun, error) {
-	query := `
+const runColumns = `
 SELECT pr.run_id, pr.ticket_id, pr.ticket_no, pr.cpe_id, pr.township, COALESCE(pr.current_state, ''),
-       pr.before_queue, pr.target_queue, rej.http_status, pr.is_remote_resolved, pr.is_bcs_success, pr.last_state_reason,
+       pr.before_queue, pr.target_queue, rej.http_status, pr.is_remote_resolved, pr.is_bcs_success, pr.bcs_status_message, pr.last_state_reason,
        pr.created_at, pr.updated_at, pr.completed_at
 FROM pipeline_runs pr` + rejectedStatus + `
-WHERE pr.created_at >= ? AND pr.created_at < ?
-ORDER BY pr.created_at ASC`
-	rows, err := q.QueryContext(ctx, query, w.Start, w.End, w.Start, w.End)
+WHERE pr.created_at >= ? AND pr.created_at < ?`
+
+func queryTodayRuns(ctx context.Context, q querier, w Window) ([]ExportRun, error) {
+	rows, err := q.QueryContext(ctx, runColumns+` ORDER BY pr.created_at ASC`, w.Start, w.End, w.Start, w.End)
 	if err != nil {
 		return nil, fmt.Errorf("export query: %w", err)
 	}
-	defer rows.Close()
+	return scanRuns(rows, "export")
+}
 
-	var runs []ExportRun
+// Case is a report card the page can open as a list of today's runs. The
+// in-progress card keeps its own list (queryInProgress) with retry detail.
+type Case string
+
+const (
+	CaseInProgress     Case = "in_progress"
+	CaseReceived       Case = "received"
+	CaseSuccess        Case = "success"
+	CaseRemoteResolved Case = "remote_resolved"
+	CaseTransferred    Case = "transferred"
+	CaseKeptInNOC      Case = "kept_in_noc"
+	CaseBCSOK          Case = "bcs_ok"
+	CaseBCSFailed      Case = "bcs_failed"
+	CaseNotEligible    Case = "not_eligible"
+	CaseManualCheck    Case = "manual_check"
+)
+
+// caseCond is each list case's condition and whether it takes the NOC queue
+// name twice (condInNOC).
+var caseCond = map[Case]struct {
+	sql   string
+	inNOC bool
+}{
+	CaseReceived:       {sql: `TRUE`},
+	CaseSuccess:        {sql: condSuccess},
+	CaseRemoteResolved: {sql: condRemote},
+	CaseTransferred:    {sql: condTransferred, inNOC: true},
+	CaseKeptInNOC:      {sql: condKeptInNOC, inNOC: true},
+	CaseBCSOK:          {sql: condBCSOK},
+	CaseBCSFailed:      {sql: condBCSFailed},
+	CaseNotEligible:    {sql: condNotEligible},
+	CaseManualCheck:    {sql: condManualCheck},
+}
+
+func ParseCase(s string) (Case, bool) {
+	c := Case(strings.ToLower(s))
+	if c == "" || c == CaseInProgress {
+		return CaseInProgress, true
+	}
+	_, ok := caseCond[c]
+	return c, ok
+}
+
+// caseWhere is the condition and its arguments for one case's runs; for
+// in_progress, f picks the tab.
+func caseWhere(w Window, c Case, f Filter) (string, []any, error) {
+	if c == CaseInProgress {
+		cond, args := inProgressCond(w, f)
+		return cond, args, nil
+	}
+	cond, ok := caseCond[c]
+	if !ok {
+		return "", nil, fmt.Errorf("case %q has no run query", c)
+	}
+	if cond.inNOC {
+		return cond.sql, []any{w.NOCQueue, w.NOCQueue}, nil
+	}
+	return cond.sql, nil, nil
+}
+
+// queryCaseRuns lists today's runs of one case, newest first.
+func queryCaseRuns(ctx context.Context, q querier, w Window, c Case, limit int) ([]ExportRun, error) {
+	cond, condArgs, err := caseWhere(w, c, FilterAll)
+	if err != nil {
+		return nil, err
+	}
+	args := append([]any{w.Start, w.End, w.Start, w.End}, condArgs...)
+	query := runColumns + ` AND ` + cond + ` ORDER BY pr.created_at DESC LIMIT ?`
+	rows, err := q.QueryContext(ctx, query, append(args, limit)...)
+	if err != nil {
+		return nil, fmt.Errorf("case %s query: %w", c, err)
+	}
+	return scanRuns(rows, "case "+string(c))
+}
+
+// queryCaseExport is every one of today's runs of one case, oldest first, for
+// the CSV export of the list the page is showing.
+func queryCaseExport(ctx context.Context, q querier, w Window, c Case, f Filter) ([]ExportRun, error) {
+	cond, condArgs, err := caseWhere(w, c, f)
+	if err != nil {
+		return nil, err
+	}
+	args := append([]any{w.Start, w.End, w.Start, w.End}, condArgs...)
+	rows, err := q.QueryContext(ctx, runColumns+` AND `+cond+` ORDER BY pr.created_at ASC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("case %s export query: %w", c, err)
+	}
+	return scanRuns(rows, "case "+string(c)+" export")
+}
+
+func scanRuns(rows *sql.Rows, what string) ([]ExportRun, error) {
+	defer rows.Close()
+	runs := []ExportRun{}
 	for rows.Next() {
 		var r ExportRun
 		if err := rows.Scan(&r.RunID, &r.TicketID, &r.TicketNo, &r.CpeID, &r.Township, &r.State,
-			&r.BeforeQueue, &r.TargetQueue, &r.HTTPStatus, &r.IsRemoteResolved, &r.IsBCSSuccess, &r.LastStateReason,
+			&r.BeforeQueue, &r.TargetQueue, &r.HTTPStatus, &r.IsRemoteResolved, &r.IsBCSSuccess, &r.BCSStatusMessage, &r.LastStateReason,
 			&r.CreatedAt, &r.UpdatedAt, &r.CompletedAt); err != nil {
-			return nil, fmt.Errorf("export scan: %w", err)
+			return nil, fmt.Errorf("%s scan: %w", what, err)
 		}
 		runs = append(runs, r)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 )
@@ -116,5 +117,74 @@ func TestNewSummaryResponseSuccessSplit(t *testing.T) {
 	r := newSummaryResponse(w, Summary{Success: 192, RemoteResolved: 136, NotRemoteResolved: 56, KeptInNOC: 22})
 	if r.Success.RemoteResolved != 136 || r.Success.Transferred != 34 || r.Success.KeptInNOC != 22 {
 		t.Fatalf("success split = %+v, want remote 136 / transferred 34 / kept 22", r.Success)
+	}
+}
+
+func TestParseCase(t *testing.T) {
+	for in, want := range map[string]Case{"": CaseInProgress, "in_progress": CaseInProgress,
+		"Manual_Check": CaseManualCheck, "transferred": CaseTransferred, "received": CaseReceived} {
+		if got, ok := ParseCase(in); !ok || got != want {
+			t.Errorf("ParseCase(%q) = %q, %v", in, got, ok)
+		}
+	}
+	for _, in := range []string{"skipped", "unclassified", "done"} {
+		if _, ok := ParseCase(in); ok {
+			t.Errorf("ParseCase(%q) accepted", in)
+		}
+	}
+}
+
+func TestCaseConditions(t *testing.T) {
+	for c, cond := range caseCond {
+		if got, want := strings.Count(cond.sql, "?"), map[bool]int{false: 0, true: 2}[cond.inNOC]; got != want {
+			t.Errorf("case %s: %d placeholders, inNOC=%v wants %d", c, got, cond.inNOC, want)
+		}
+	}
+	// Manual check is every state the validation, API error and failed buckets count.
+	for _, state := range []string{"API_REJECTED", "API_UNREACHABLE", "CONSUME_VALIDATION_FAILED",
+		"FAILED_PERMANENT", "NORMALIZE_FAILED", "CPE_NOT_FOUND", "RT_UPDATE_FAILED"} {
+		if card(bucket(state, true, 0)) != "manual_check" || !strings.Contains(condManualCheck, "'"+state+"'") {
+			t.Errorf("manual check and bucket disagree on %s", state)
+		}
+	}
+}
+
+func TestCaseTotal(t *testing.T) {
+	w := NewWindow(time.Date(2026, 10, 6, 14, 35, 0, 0, time.Local), 10)
+	r := newSummaryResponse(w, Summary{Received: 312, InProgress: 4, Success: 192, RemoteResolved: 136,
+		NotRemoteResolved: 56, KeptInNOC: 22, NotEligible: 40, CPENotFound: 7, APIUnreachable: 3})
+	for c, want := range map[Case]int{CaseReceived: 312, CaseInProgress: 4, CaseSuccess: 192,
+		CaseTransferred: 34, CaseKeptInNOC: 22, CaseNotEligible: 40, CaseManualCheck: 10} {
+		if got := caseTotal(r, c); got != want {
+			t.Errorf("caseTotal(%s) = %d, want %d", c, got, want)
+		}
+	}
+}
+
+func TestNewRunItem(t *testing.T) {
+	start := time.Date(2026, 10, 6, 9, 0, 0, 0, time.Local)
+	it := newRunItem(ExportRun{RunID: "r1", State: "API_REJECTED", CreatedAt: start,
+		HTTPStatus:      sql.NullInt64{Int64: 409, Valid: true},
+		LastStateReason: sql.NullString{String: "ticket already open", Valid: true},
+		CompletedAt:     sql.NullTime{Time: start.Add(95 * time.Second), Valid: true}})
+	if it.Bucket != "api_error" || *it.HTTPStatus != 409 || it.Reason != "ticket already open" ||
+		*it.DurationSec != 95 || *it.CompletedAt != "2026-10-06T09:01:35" || it.IsBCSSuccess != nil {
+		t.Fatalf("run item = %+v", it)
+	}
+}
+
+func TestCaseWhere(t *testing.T) {
+	w := NewWindow(time.Date(2026, 10, 6, 14, 35, 0, 0, time.Local), 10)
+	w.NOCQueue = "NOC"
+	for _, c := range []Case{CaseInProgress, CaseReceived, CaseKeptInNOC, CaseTransferred, CaseManualCheck} {
+		for _, f := range []Filter{FilterAll, FilterRetrying, FilterStuck} {
+			cond, args, err := caseWhere(w, c, f)
+			if err != nil || strings.Count(cond, "?") != len(args) {
+				t.Errorf("caseWhere(%s, %s): %d placeholders, %d args, err %v", c, f, strings.Count(cond, "?"), len(args), err)
+			}
+		}
+	}
+	if _, _, err := caseWhere(w, "skipped", FilterAll); err == nil {
+		t.Error("caseWhere(skipped) accepted")
 	}
 }

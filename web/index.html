@@ -142,6 +142,23 @@
   .note code { font-size: 11px; }
   .warn-text { color: var(--critical); font-weight: 600; }
 
+  [data-case] { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+  .card[data-case]:hover, .stat[data-case]:hover { border-color: var(--ink-3); }
+  .split .lab [data-case] { border-radius: 6px; padding: 4px 6px; margin: -4px -6px; }
+  .split .lab [data-case]:hover { background: var(--surface); }
+  [data-case]:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+  [data-case].picked { border-color: var(--series-1); box-shadow: 0 0 0 1px var(--series-1); }
+  .split .lab [data-case].picked { background: var(--wash-new); box-shadow: none; }
+  .back { border: 0; background: none; padding: 0; color: var(--series-1); font-size: 12px; font-weight: 600; }
+  .back[hidden], .seg[hidden] { display: none; }
+  .bucket { display: block; font-size: 11px; color: var(--ink-3); }
+  .runs td.reason { white-space: normal; min-width: 220px; max-width: 420px; color: var(--ink-2); overflow-wrap: anywhere; }
+  .reason .http { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 600; color: var(--pill-stuck-ink); margin-right: 6px; }
+  .q { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .ok { color: var(--good-ink); font-weight: 600; } .bad { color: var(--critical); font-weight: 600; }
+  .runs td.bcs { min-width: 70px; max-width: 260px; white-space: normal; }
+  .bcs-msg { display: block; margin-top: 2px; font-size: 11.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+
   @media (max-width: 1100px) {
     .kpis { grid-template-columns: repeat(2, 1fr); }
     .succ { grid-template-columns: 1fr; gap: 16px; }
@@ -163,31 +180,31 @@
     </div>
     <div class="spacer"></div>
     <div class="control"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span id="range">Today · …</span></div>
-    <a class="control" href="api/v1/pipeline-runs/today/export.csv"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Export CSV</a>
+    <a class="control" id="export" href="api/v1/pipeline-runs/today/export.csv" title="Exports the runs of the list shown below"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Export CSV</a>
   </div>
 
   <div class="banner" id="banner"></div>
 
   <div class="kpis">
-    <div class="card kpi hero">
+    <div class="card kpi hero" data-case="received" role="button" tabindex="0">
       <div class="label">Received</div>
       <div class="value" id="k-received">—</div>
       <div class="meta">since 00:00 today</div>
       <div class="state">all runs opened today</div>
     </div>
-    <div class="card kpi">
+    <div class="card kpi" data-case="in_progress" role="button" tabindex="0">
       <div class="label"><span class="ico i-warn"><svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"/></svg></span>In progress</div>
       <div class="value" id="k-progress">—</div>
       <div class="meta" id="m-progress">&nbsp;</div>
       <div class="state">completed_at IS NULL</div>
     </div>
-    <div class="card kpi">
+    <div class="card kpi" data-case="success" role="button" tabindex="0">
       <div class="label"><span class="ico i-good"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg></span>Success</div>
       <div class="value" id="k-success">—</div>
       <div class="meta" id="m-success">&nbsp;</div>
       <div class="state">COMPLETED</div>
     </div>
-    <div class="card kpi">
+    <div class="card kpi" data-case="remote_resolved" role="button" tabindex="0">
       <div class="label"><span class="sw" style="background:var(--series-1);margin:0"></span>Remote resolved</div>
       <div class="value" id="k-remote">—</div>
       <div class="meta" id="m-remote">&nbsp;</div>
@@ -196,8 +213,8 @@
   </div>
 
   <div class="kpis small">
-    <div class="card kpi"><div class="label"><span class="ico i-out"><svg viewBox="0 0 24 24"><path d="M6 6l12 12"/></svg></span>Not eligible</div><div class="value" id="k-noteligible">—</div><div class="meta" id="m-noteligible">&nbsp;</div><div class="state">NOT_ELIGIBLE</div></div>
-    <div class="card kpi"><div class="label"><span class="ico i-crit"><svg viewBox="0 0 24 24"><path d="M12 7v6M12 17h.01"/></svg></span>Manual check</div><div class="value" id="k-manual">—</div><div class="meta" id="m-manual">&nbsp;</div><div class="state">API_REJECTED · API_UNREACHABLE · CONSUME_VALIDATION_FAILED · FAILED_PERMANENT · CPE_NOT_FOUND · RT_UPDATE_FAILED</div></div>
+    <div class="card kpi" data-case="not_eligible" role="button" tabindex="0"><div class="label"><span class="ico i-out"><svg viewBox="0 0 24 24"><path d="M6 6l12 12"/></svg></span>Not eligible</div><div class="value" id="k-noteligible">—</div><div class="meta" id="m-noteligible">&nbsp;</div><div class="state">NOT_ELIGIBLE</div></div>
+    <div class="card kpi" data-case="manual_check" role="button" tabindex="0"><div class="label"><span class="ico i-crit"><svg viewBox="0 0 24 24"><path d="M12 7v6M12 17h.01"/></svg></span>Manual check</div><div class="value" id="k-manual">—</div><div class="meta" id="m-manual">&nbsp;</div><div class="state">API_REJECTED · API_UNREACHABLE · CONSUME_VALIDATION_FAILED · FAILED_PERMANENT · CPE_NOT_FOUND · RT_UPDATE_FAILED</div></div>
   </div>
 
   <div class="row2">
@@ -207,14 +224,14 @@
         <div class="split">
           <div class="bar"><div id="bar-remote" style="flex:0;background:var(--series-1)"></div><div id="bar-transfer" style="flex:0;background:var(--series-2)"></div><div id="bar-kept" style="flex:0;background:var(--neutral)"></div></div>
           <div class="lab">
-            <div><span class="sw" style="background:var(--series-1)"></span>Remote resolved <b id="l-remote">—</b><div class="crit">COMPLETED + is_remote_resolved = 1</div></div>
-            <div><span class="sw" style="background:var(--series-2)"></span>Transferred <b id="l-transfer">—</b><div class="crit">COMPLETED + is_remote_resolved = 0 − Kept in NOC</div></div>
-            <div><span class="sw" style="background:var(--neutral)"></span>Kept in NOC <b id="l-kept">—</b><div class="crit">COMPLETED + before_queue = target_queue = NOC</div></div>
+            <div data-case="remote_resolved" role="button" tabindex="0"><span class="sw" style="background:var(--series-1)"></span>Remote resolved <b id="l-remote">—</b><div class="crit">COMPLETED + is_remote_resolved = 1</div></div>
+            <div data-case="transferred" role="button" tabindex="0"><span class="sw" style="background:var(--series-2)"></span>Transferred <b id="l-transfer">—</b><div class="crit">COMPLETED + is_remote_resolved = 0 − Kept in NOC</div></div>
+            <div data-case="kept_in_noc" role="button" tabindex="0"><span class="sw" style="background:var(--neutral)"></span>Kept in NOC <b id="l-kept">—</b><div class="crit">COMPLETED + before_queue = target_queue = NOC</div></div>
           </div>
         </div>
         <div class="stat-grid">
-          <div class="stat"><div class="k"><span class="ico i-good"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg></span>BCS updated</div><div class="v"><span id="s-bcsok">—</span><small id="s-bcsok-of"></small></div></div>
-          <div class="stat"><div class="k"><span class="ico i-serious"><svg viewBox="0 0 24 24"><path d="M12 7v6M12 17h.01"/></svg></span>Resolved, BCS failed</div><div class="v"><span id="s-bcsfail">—</span><small>needs follow-up</small></div></div>
+          <div class="stat" data-case="bcs_ok" role="button" tabindex="0"><div class="k"><span class="ico i-good"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg></span>BCS updated</div><div class="v"><span id="s-bcsok">—</span><small id="s-bcsok-of"></small></div></div>
+          <div class="stat" data-case="bcs_failed" role="button" tabindex="0"><div class="k"><span class="ico i-serious"><svg viewBox="0 0 24 24"><path d="M12 7v6M12 17h.01"/></svg></span>Resolved, BCS failed</div><div class="v"><span id="s-bcsfail">—</span><small>needs follow-up</small></div></div>
         </div>
       </div>
     </div>
@@ -222,7 +239,8 @@
 
   <div class="card live">
     <div class="live-head">
-      <div><h2 style="font-size:15px;font-weight:650;margin:0">In progress now</h2><div class="hint">Today's runs not yet in a terminal state · oldest first</div></div>
+      <div><h2 style="font-size:15px;font-weight:650;margin:0" id="list-title">In progress now</h2><div class="hint" id="list-hint">Today's runs not yet in a terminal state · oldest first</div></div>
+      <button type="button" class="back" id="back" hidden>← Back to in progress</button>
       <span class="live-badge" id="badge"><span class="pulse"></span><span id="badge-text">LIVE</span></span>
       <div class="spacer"></div>
       <div class="seg" id="tabs">
@@ -238,15 +256,11 @@
     </div>
     <div class="table-scroll">
       <table class="runs">
-        <thead><tr>
-          <th>Ticket</th><th>CPE ID</th><th>Township</th>
-          <th>Stage &nbsp;<span style="font-weight:400">Submitted → Received → Fetch → Workflow → Published → Consumed → BCS → RT</span></th>
-          <th>Retry</th><th>Age</th><th>Started</th>
-        </tr></thead>
+        <thead id="thead"></thead>
         <tbody id="rows"><tr class="empty"><td colspan="7">Loading…</td></tr></tbody>
       </table>
     </div>
-    <div class="foot"><span id="foot-text">&nbsp;</span><button type="button" id="more" hidden>View all in-progress runs →</button></div>
+    <div class="foot"><span id="foot-text">&nbsp;</span><button type="button" id="more" hidden>View up to 200 runs →</button></div>
   </div>
 
   <div class="note">
@@ -265,8 +279,31 @@
   const WEEKDAY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const MONTH = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+  // Each card opens a list of today's runs behind its number. in_progress is
+  // the live list with stepper and retry tabs; the rest show where a run ended
+  // up and why.
+  const CASES = {
+    in_progress: ['In progress now', "Today's runs not yet in a terminal state · oldest first"],
+    received: ['Received today', 'Every run opened today, any state · newest first'],
+    success: ['Success', 'COMPLETED · newest first'],
+    remote_resolved: ['Remote resolved', 'COMPLETED + is_remote_resolved = 1 · newest first'],
+    transferred: ['Transferred', 'COMPLETED, moved to another queue · newest first'],
+    kept_in_noc: ['Kept in NOC', 'COMPLETED, left in the NOC queue for NOC to follow up · newest first'],
+    bcs_ok: ['BCS updated', 'Remote resolved and BCS updated · newest first'],
+    bcs_failed: ['Resolved, BCS failed', 'Remote resolved but the BCS update failed · needs follow-up · newest first'],
+    not_eligible: ['Not eligible', 'Workflow gate failed · reason shows which check · newest first'],
+    manual_check: ['Manual check', 'Ended without automation finishing · reason shows why · newest first'],
+  };
+  const HEAD_LIVE = `<tr><th>Ticket</th><th>CPE ID</th><th>Township</th>
+    <th>Stage &nbsp;<span style="font-weight:400">Submitted → Received → Fetch → Workflow → Published → Consumed → BCS → RT</span></th>
+    <th>Retry</th><th>Age</th><th>Started</th></tr>`;
+  const HEAD_CASE = `<tr><th>Ticket</th><th>CPE ID</th><th>Township</th><th>State</th><th>Queue</th><th>BCS</th>
+    <th>Reason</th><th>Started</th><th>Completed</th></tr>`;
+  const BUCKET = { validation_failed: 'validation failed', api_error: 'API error', failed: 'failed',
+    in_progress: 'in progress', not_eligible: 'not eligible', success: 'success', skipped: 'skipped', unclassified: 'unclassified' };
+
   const state = {
-    filter: 'all', limit: 50, paused: false, timer: null, tick: null,
+    view: 'in_progress', filter: 'all', limit: 50, paused: false, timer: null, tick: null,
     nextAt: 0, lastOk: 0, lastUpdated: '', seen: null, inflight: false, seq: 0, error: false,
   };
   const $ = id => document.getElementById(id);
@@ -331,6 +368,29 @@
     return `<span class="steps">${html}</span>`;
   }
 
+  const ticketCell = it => `<td class="tk">${it.ticket_id !== null ? `#${esc(it.ticket_id)}` : '—'}<small>${esc(it.ticket_no) || '&nbsp;'}</small></td>
+      <td class="mono" style="font-size:12px">${esc(it.cpe_id) || '—'}</td>
+      <td>${esc(it.township) || '—'}</td>`;
+
+  function caseRowHTML(it) {
+    const queue = it.before_queue || it.target_queue
+      ? `<span class="q">${esc(it.before_queue) || '—'} → ${esc(it.target_queue) || '—'}</span>`
+      : '<span class="muted">—</span>';
+    const bcs = it.is_bcs_success === null || it.is_remote_resolved !== true
+      ? '<span class="muted">—</span>'
+      : it.is_bcs_success ? '<span class="ok">ok</span>'
+      : `<span class="bad">failed</span>${it.bcs_status_message ? `<span class="bcs-msg">${esc(it.bcs_status_message)}</span>` : ''}`;
+    const http = it.http_status !== null ? `<span class="http">HTTP ${esc(it.http_status)}</span>` : '';
+    const reason = http || it.reason ? `${http}${esc(it.reason)}` : '<span class="muted">—</span>';
+    const done = it.completed_at
+      ? `${hhmmss(it.completed_at)} <span class="muted">· ${age(it.duration_sec)}</span>`
+      : '<span class="muted">—</span>';
+    return `${ticketCell(it)}
+      <td><span class="stage-name">${esc(it.current_state) || '""'}</span><span class="bucket">${esc(BUCKET[it.bucket] || it.bucket)}</span></td>
+      <td>${queue}</td><td class="bcs" title="${esc(it.bcs_status_message)}">${bcs}</td><td class="reason" title="${esc(it.reason)}">${reason}</td>
+      <td class="muted num">${hhmmss(it.started_at)}</td><td class="num">${done}</td>`;
+  }
+
   function rowHTML(it) {
     const retry = it.retry
       ? `<span class="pill warn">${ICON_RETRY}${it.retry.next_attempt} / ${it.retry.max_attempts}</span>`
@@ -339,21 +399,23 @@
     const ageCell = it.is_stuck
       ? `<span class="pill stuck" title="no state change for ${age(it.idle_sec)}">${ICON_STUCK}${age(it.age_sec)}</span>`
       : `<span class="num">${age(it.age_sec)}</span>`;
-    const ticket = it.ticket_id !== null ? `#${esc(it.ticket_id)}` : '—';
-    return `<td class="tk">${ticket}<small>${esc(it.ticket_no) || '&nbsp;'}</small></td>
-      <td class="mono" style="font-size:12px">${esc(it.cpe_id) || '—'}</td>
-      <td>${esc(it.township) || '—'}</td>
+    return `${ticketCell(it)}
       <td>${stepper(it)}<span class="stage-name">${esc(it.current_state) || '""'}</span><span class="owner">${esc(it.owner)}</span></td>
       <td>${retry}</td><td>${ageCell}</td><td class="muted num">${hhmmss(it.started_at)}</td>`;
   }
 
   // Rows are keyed by run_id so a refresh updates cells in place instead of
   // rebuilding the table (keeps scroll position and hover state).
-  function renderRows(list, summaryTotal) {
+  function renderRows(list, summary) {
     const tbody = $('rows');
     const items = list.items;
+    const live = state.view === 'in_progress';
+    const toHTML = live ? rowHTML : caseRowHTML;
     if (!items.length) {
-      tbody.innerHTML = `<tr class="empty"><td colspan="7">No ${state.filter === 'all' ? '' : state.filter + ' '}runs in progress right now.</td></tr>`;
+      const what = live
+        ? `No ${state.filter === 'all' ? '' : state.filter + ' '}runs in progress right now.`
+        : `No ${CASES[state.view][0].toLowerCase()} runs today.`;
+      tbody.innerHTML = `<tr class="empty"><td colspan="${colspan()}">${what}</td></tr>`;
     } else {
       const existing = new Map();
       tbody.querySelectorAll('tr[data-run]').forEach(tr => existing.set(tr.dataset.run, tr));
@@ -363,7 +425,7 @@
       let prev = null;
       for (const it of items) {
         let tr = existing.get(it.run_id);
-        const html = rowHTML(it);
+        const html = toHTML(it);
         if (!tr) {
           tr = document.createElement('tr');
           tr.dataset.run = it.run_id;
@@ -377,7 +439,7 @@
           if (tr._html !== html) tr.innerHTML = html;
         }
         tr._html = html;
-        tr.classList.toggle('warn', it.is_stuck);
+        tr.classList.toggle('warn', !!it.is_stuck);
         const ref = prev ? prev.nextSibling : tbody.firstChild;
         if (ref !== tr) tbody.insertBefore(tr, ref);
         prev = tr;
@@ -387,8 +449,43 @@
     state.seen = new Set([...(state.seen || []), ...items.map(it => it.run_id)]);
 
     const shown = items.length;
-    set('foot-text', `Showing ${shown} of ${list.total} · stuck = no state change for ${summaryTotal.stuck_minutes}+ min`);
+    set('foot-text', live
+      ? `Showing ${shown} of ${list.total} · stuck = no state change for ${summary.stuck_minutes}+ min`
+      : `Showing ${shown} of ${list.total}`);
     $('more').hidden = !(list.total > shown && state.limit < 200);
+  }
+
+  // Export CSV downloads the list the table is showing.
+  const setExport = () => {
+    const params = state.view === 'in_progress'
+      ? `case=in_progress&filter=${encodeURIComponent(state.filter)}`
+      : `case=${encodeURIComponent(state.view)}`;
+    $('export').href = `api/v1/pipeline-runs/today/export.csv?${params}`;
+  };
+  const colspan = () => state.view === 'in_progress' ? 7 : 9;
+  const loadingRow = () => `<tr class="empty"><td colspan="${colspan()}">Loading…</td></tr>`;
+
+  // Swaps the table to another card's runs. The previous list's rows are
+  // dropped and "seen" reset, so the new list does not flash every row as new.
+  function showCase(view) {
+    if (!CASES[view]) view = 'in_progress';
+    state.view = view;
+    state.limit = 50;
+    state.seen = null;
+    const live = view === 'in_progress';
+    document.querySelectorAll('[data-case]').forEach(el => {
+      const on = !live && el.dataset.case === view;
+      el.classList.toggle('picked', on);
+      el.setAttribute('aria-pressed', String(on));
+    });
+    set('list-title', CASES[view][0]);
+    set('list-hint', CASES[view][1]);
+    $('back').hidden = live;
+    $('tabs').hidden = !live;
+    $('thead').innerHTML = live ? HEAD_LIVE : HEAD_CASE;
+    $('rows').innerHTML = loadingRow();
+    setExport();
+    try { history.replaceState(null, '', live ? location.pathname + location.search : '#case=' + view); } catch {}
   }
 
   function setBadge() {
@@ -428,10 +525,12 @@
       : `Refreshing in ${secs}s · updated ${state.lastUpdated}`;
   }
 
-  async function refresh() {
+  // force loads once even while paused, so switching lists never leaves the
+  // table on "Loading…"; polling still resumes only with Resume.
+  async function refresh(force) {
     clearTimeout(state.timer);
     state.timer = null;
-    if (state.paused || document.visibilityState === 'hidden') { renderCountdown(); return; }
+    if (!force && (state.paused || document.visibilityState === 'hidden')) { renderCountdown(); return; }
     // A newer refresh (filter change, resume, tab shown) supersedes this one:
     // only the latest request renders and schedules the next poll, so there
     // is never more than one timer running.
@@ -439,12 +538,15 @@
     state.inflight = true;
     renderCountdown();
     try {
-      const res = await fetch(`api/v1/pipeline-runs/today?filter=${encodeURIComponent(state.filter)}&limit=${state.limit}`, { cache: 'no-store' });
+      const params = state.view === 'in_progress'
+        ? `filter=${encodeURIComponent(state.filter)}`
+        : `case=${encodeURIComponent(state.view)}`;
+      const res = await fetch(`api/v1/pipeline-runs/today?${params}&limit=${state.limit}`, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (seq !== state.seq) return;
       renderSummary(data.summary);
-      renderRows(data.in_progress, data.summary);
+      renderRows(data.runs || data.in_progress, data.summary);
       state.lastOk = Date.now();
       state.lastUpdated = hhmmss(data.summary.generated_at);
       state.error = false;
@@ -470,10 +572,24 @@
     state.filter = b.dataset.filter;
     state.limit = 50;
     document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
-    $('rows').innerHTML = '<tr class="empty"><td colspan="7">Loading…</td></tr>';
-    if (!state.paused) refresh();
+    setExport();
+    $('rows').innerHTML = loadingRow();
+    refresh(true);
   });
-  $('more').addEventListener('click', () => { state.limit = 200; if (!state.paused) refresh(); });
+  // Clicking the picked card again, or Back, returns to the live list.
+  const pick = el => {
+    showCase(el.dataset.case === state.view ? 'in_progress' : el.dataset.case);
+    $('rows').closest('.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    refresh(true);
+  };
+  document.querySelectorAll('[data-case]').forEach(el => {
+    el.addEventListener('click', () => pick(el));
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(el); }
+    });
+  });
+  $('back').addEventListener('click', () => { showCase('in_progress'); refresh(true); });
+  $('more').addEventListener('click', () => { state.limit = 200; refresh(true); });
   $('pause').addEventListener('click', () => {
     state.paused = !state.paused;
     setBadge();
@@ -486,6 +602,7 @@
   });
 
   state.tick = setInterval(renderCountdown, 250);
+  showCase((location.hash.match(/case=(\w+)/) || [])[1]);
   setBadge();
   refresh();
 })();

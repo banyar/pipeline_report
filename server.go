@@ -42,18 +42,29 @@ func (s *Server) window() Window {
 	return w
 }
 
-// handleToday serves the summary and the live list measured at one instant,
-// which is what the page polls every 5 seconds.
+// handleToday serves the summary and one list measured at one instant, which
+// is what the page polls every 5 seconds. The list is the live in-progress
+// one ("in_progress"), or with ?case= the runs behind another card ("runs").
 func (s *Server) handleToday(w http.ResponseWriter, r *http.Request) {
 	f, limit, ok := listParams(w, r)
 	if !ok {
 		return
 	}
+	c, ok := ParseCase(r.URL.Query().Get("case"))
+	if !ok {
+		http.Error(w, "unknown case", http.StatusBadRequest)
+		return
+	}
 	win := s.window()
 	var sum Summary
 	var live InProgressResponse
+	var runs []ExportRun
 	err := s.store.Snapshot(r.Context(), func(q querier) (err error) {
 		if sum, err = querySummary(r.Context(), q, win); err != nil {
+			return err
+		}
+		if c != CaseInProgress {
+			runs, err = queryCaseRuns(r.Context(), q, win, c, limit)
 			return err
 		}
 		live, err = inProgress(r.Context(), q, win, sum, f, limit)
@@ -63,8 +74,26 @@ func (s *Server) handleToday(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
+	summary := newSummaryResponse(win, sum)
+	if c != CaseInProgress {
+		items := make([]RunItem, 0, len(runs))
+		for _, run := range runs {
+			items = append(items, newRunItem(run))
+		}
+		writeJSON(w, map[string]any{
+			"summary": summary,
+			"runs": CaseResponse{
+				GeneratedAt: win.Now.Format(wireTime),
+				Case:        c,
+				Total:       caseTotal(summary, c),
+				Limit:       limit,
+				Items:       items,
+			},
+		})
+		return
+	}
 	writeJSON(w, map[string]any{
-		"summary":     newSummaryResponse(win, sum),
+		"summary":     summary,
 		"in_progress": live,
 	})
 }
@@ -123,11 +152,36 @@ func inProgress(ctx context.Context, q querier, win Window, sum Summary, f Filte
 	}, nil
 }
 
+// handleExport writes all of today's runs, or with ?case= (and for
+// in_progress, ?filter=) only the runs of the list the page is showing.
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	rawCase := q.Get("case")
+	c, ok := ParseCase(rawCase)
+	if !ok {
+		http.Error(w, "unknown case", http.StatusBadRequest)
+		return
+	}
+	f, ok := ParseFilter(q.Get("filter"))
+	if !ok {
+		http.Error(w, "filter must be all, retrying or stuck", http.StatusBadRequest)
+		return
+	}
 	win := s.window()
+	name := "pipeline-runs-" + win.Start.Format("2006-01-02")
+	if rawCase != "" {
+		name += "-" + string(c)
+		if c == CaseInProgress && f != FilterAll {
+			name += "-" + string(f)
+		}
+	}
 	var runs []ExportRun
 	err := s.store.Snapshot(r.Context(), func(q querier) (err error) {
-		runs, err = queryTodayRuns(r.Context(), q, win)
+		if rawCase == "" {
+			runs, err = queryTodayRuns(r.Context(), q, win)
+		} else {
+			runs, err = queryCaseExport(r.Context(), q, win, c, f)
+		}
 		return err
 	})
 	if err != nil {
@@ -136,11 +190,11 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition",
-		`attachment; filename="pipeline-runs-`+win.Start.Format("2006-01-02")+`.csv"`)
+		`attachment; filename="`+name+`.csv"`)
 
 	cw := csv.NewWriter(w)
 	_ = cw.Write([]string{"run_id", "ticket_id", "ticket_no", "cpe_id", "township", "current_state", "card", "bucket", "before_queue", "target_queue",
-		"api_http_status", "is_remote_resolved", "is_bcs_success", "last_state_reason",
+		"api_http_status", "is_remote_resolved", "is_bcs_success", "bcs_status_message", "last_state_reason",
 		"created_at", "updated_at", "completed_at"})
 	for _, run := range runs {
 		b := bucket(run.State, run.CompletedAt.Valid, run.HTTPStatus.Int64)
@@ -148,7 +202,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 			run.RunID, nullInt(run.TicketID), run.TicketNo.String, run.CpeID.String, run.Township.String,
 			run.State, card(b), b, run.BeforeQueue.String, run.TargetQueue.String,
 			nullInt(run.HTTPStatus), nullBool(run.IsRemoteResolved), nullBool(run.IsBCSSuccess),
-			run.LastStateReason.String,
+			run.BCSStatusMessage.String, run.LastStateReason.String,
 			run.CreatedAt.Format(wireTime), nullTime(run.UpdatedAt), nullTime(run.CompletedAt),
 		})
 	}

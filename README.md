@@ -44,9 +44,10 @@ Pipeline service များ (rtdatacore DSN `loc=Local`) သည် DATETIME �
 |---|---|
 | `GET /` | Report UI (5 စက္ကန့်တစ်ကြိမ် refresh) |
 | `GET /api/v1/pipeline-runs/today?filter=&limit=` | Summary + live list ကို အချိန်တစ်ခုတည်းဖြင့် — UI က ဤ endpoint ကို poll လုပ်သည် |
+| `GET /api/v1/pipeline-runs/today?case=&limit=` | Summary + card တစ်ခု၏ run list (`runs`) — state, queue, BCS, reason ပါသည်။ case: `received`, `success`, `remote_resolved`, `transferred`, `kept_in_noc`, `bcs_ok`, `bcs_failed`, `not_eligible`, `manual_check` (မပါ/`in_progress` ဆိုလျှင် live list) |
 | `GET /api/v1/pipeline-runs/today/summary` | Spec ၏ Q1 (§10 JSON) |
 | `GET /api/v1/pipeline-runs/today/in-progress?filter=all\|retrying\|stuck&limit=` | Spec ၏ Q2 (limit default 50, max 200) |
-| `GET /api/v1/pipeline-runs/today/export.csv` | ယနေ့ run အားလုံး + bucket (Export CSV ခလုတ်) |
+| `GET /api/v1/pipeline-runs/today/export.csv?case=&filter=` | ယနေ့ run + bucket (Export CSV ခလုတ်)။ case မပါလျှင် run အားလုံး၊ case ပါလျှင် ထို card ၏ run များသာ (`in_progress` တွင် filter ကိုလည်း လိုက်သည်) |
 | `GET /healthz` | DB ping |
 
 ## Spec နှင့် ကွာခြားချက်
