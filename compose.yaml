@@ -1,0 +1,17 @@
+# docker compose up -d --build     → http://localhost:8090
+#
+# Config is read from .env, the same file `make run` uses. The container
+# shares the host network, so MYSQL_DB_HOST=127.0.0.1 reaches MySQL on this
+# machine as-is (a MySQL user allowed only from localhost still works).
+# The report listens on :8090 on the host.
+services:
+  pipeline-report:
+    build: .
+    image: pipeline-report:latest
+    container_name: pipeline-report
+    env_file: .env
+    environment:
+      REPORT_HTTP_ADDR: ":8090"
+      TZ: ${REPORT_TZ:-UTC} # log timestamps; the report itself uses REPORT_TZ
+    network_mode: host
+    restart: unless-stopped

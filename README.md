@@ -20,6 +20,21 @@ Module သည် `../go.work` ထဲတွင် မပါသဖြင့် Mak
 | `make run` | Server run (`ENV=` ဖြင့် config file ပြောင်းနိုင်) |
 | `make build` | `bin/pipeline-report` binary ထုတ် |
 | `make test` | `go vet` + unit test |
+| `make docker-up` / `docker-down` / `docker-logs` | Docker ဖြင့် run / ရပ် / log ကြည့် |
+
+### Docker
+
+```bash
+cp .env.example .env          # make run နှင့် တူသော .env
+make docker-up                # = docker compose up -d --build → http://localhost:8090
+make docker-logs
+make docker-down
+```
+
+- Image သည် multi-stage build (`golang:1.24-alpine` → `alpine:3.20`၊ ~15MB) ဖြစ်ပြီး `web/` ကို binary ထဲ embed ထားသည်။ Non-root user (`report`) ဖြင့် run ပြီး `/healthz` ဖြင့် healthcheck လုပ်သည်။
+- `.env` ကို image ထဲ မထည့်ပါ (`.dockerignore`)။ Compose က `env_file: .env` ဖြင့် environment variable အဖြစ် ပေးသည်။
+- Container သည် **host network** ကို သုံးသဖြင့် `MYSQL_DB_HOST=127.0.0.1` သည် ဤစက်ပေါ်ရှိ MySQL ကို တိုက်ရိုက် ရောက်ပြီး `localhost` မှသာ ခွင့်ပြုထားသော MySQL user လည်း အလုပ်လုပ်သည်။ Container က host ၏ port `8090` တွင် listen လုပ်သည်။
+- Bridge network (port mapping) ဖြင့် run လိုပါက MySQL user ကို Docker subnet (ဥပမာ `'report_ro'@'172.%'`) မှ ခွင့်ပြုထားရမည်။ မဟုတ်လျှင် `Error 1130: Host '172.x.x.x' is not allowed` ရမည်။
 
 ## Config
 
@@ -31,6 +46,7 @@ Module သည် `../go.work` ထဲတွင် မပါသဖြင့် Mak
 | `REPORT_NOC_QUEUE` | `Network Operation Center (NOC)` | Success run ၏ `before_queue` နှင့် `target_queue` နှစ်ခုလုံး ဤ queue ဖြစ်လျှင် "Kept in NOC" |
 | `REPORT_STUCK_MINUTES` | `10` | Retry မဟုတ်ဘဲ state မပြောင်းသော မိနစ် — Stuck |
 | `REPORT_DB_MAX_OPEN` | `5` | Report ၏ connection pool အရွယ် |
+| `REPORT_LOG_SQL` | `false` | `true` ဖြစ်လျှင် query တိုင်းကို argument များ ဖြည့်ပြီးသား final SQL အဖြစ် log ထုတ်သည် |
 
 Environment variable သည် `.env` ထက် ဦးစားပေးသည်။
 
@@ -42,9 +58,10 @@ Pipeline service များ (rtdatacore DSN `loc=Local`) သည် DATETIME �
 
 | Path | |
 |---|---|
-| `GET /` | Report UI (5 စက္ကန့်တစ်ကြိမ် refresh) |
+| `GET /` | Report UI (15 စက္ကန့်တစ်ကြိမ် refresh) |
 | `GET /api/v1/pipeline-runs/today?filter=&limit=` | Summary + live list ကို အချိန်တစ်ခုတည်းဖြင့် — UI က ဤ endpoint ကို poll လုပ်သည် |
 | `GET /api/v1/pipeline-runs/today?case=&limit=` | Summary + card တစ်ခု၏ run list (`runs`) — state, queue, BCS, reason ပါသည်။ case: `received`, `success`, `remote_resolved`, `transferred`, `kept_in_noc`, `bcs_ok`, `bcs_failed`, `not_eligible`, `manual_check` (မပါ/`in_progress` ဆိုလျှင် live list) |
+| `GET /api/v1/pipeline-runs/today?case=&summary=0&limit=` | Card နှိပ်ချိန် — summary မပါဘဲ card ၏ run list နှင့် `COUNT(*)` သာ (`runs.total`)။ Card များကို နောက် poll တွင် update လုပ်သည် |
 | `GET /api/v1/pipeline-runs/today/summary` | Spec ၏ Q1 (§10 JSON) |
 | `GET /api/v1/pipeline-runs/today/in-progress?filter=all\|retrying\|stuck&limit=` | Spec ၏ Q2 (limit default 50, max 200) |
 | `GET /api/v1/pipeline-runs/today/export.csv?case=&filter=` | ယနေ့ run + bucket (Export CSV ခလုတ်)။ case မပါလျှင် run အားလုံး၊ case ပါလျှင် ထို card ၏ run များသာ (`in_progress` တွင် filter ကိုလည်း လိုက်သည်) |
@@ -179,5 +196,8 @@ LIMIT :limit
 - Success panel ၏ "Queue transfer only" ကို **Transferred** (အခြား queue သို့ ရွှေ့) နှင့် **Kept in NOC** (`before_queue` = `target_queue` = `REPORT_NOC_QUEUE`၊ NOC က ဆက်ကိုင်ရမည်) ဟု ခွဲပြသည်။ Queue ကို နာမည်ဖြင့် နှိုင်းယှဉ်သဖြင့် RT ၏ queue နာမည်နှင့် `REPORT_NOC_QUEUE` တူရမည်။ CSV တွင် `before_queue` / `target_queue` column ပါသည်။
 - Validation failed / API error / Failed card များကို ဖြုတ်ပြီး **Manual check** card တစ်ခုတည်း (ပေါင်းလဒ်သာ၊ အပိုင်းခွဲ မပြ) အဖြစ် ပြသည်။ Summary API တွင် `manual_check` (= ၃ ခု ပေါင်းလဒ်) ပါပြီး အပိုင်းအလိုက် object များ (`validation_failed`, `api_error`, `failed`) ကိုလည်း ဆက်ပေးသည်။ CSV တွင် `card` column (`manual_check` စသည်) နှင့် အသေးစိတ် `bucket` column နှစ်ခုလုံး ပါသည်။
 - API error meta ကို spec ၏ အကြံပြုချက်အတိုင်း "5xx/other" ဟု ရေးသည်။
-- Export CSV ၏ column များကို spec တွင် မသတ်မှတ်ထားသဖြင့် run တစ်ခုချင်း၏ state၊ bucket၊ API http status၊ timestamp များကို ထုတ်သည်။
+- Export CSV ၏ column များကို spec တွင် မသတ်မှတ်ထားသဖြင့် run တစ်ခုချင်း၏ state၊ bucket၊ API http status၊ timestamp များအပြင် `pipeline_runs` ၏ column အများစု (ticket status / created_at / problem / tags၊ service_area၊ local_service_id၊ ref_bcs_process_id၊ onu_serial၊ olt_hostname၊ ca1၊ uplink၊ active_retry_job_id၊ before/target_bcs_channel၊ final_message) ကို ထုတ်သည်။ `id` နှင့် `rt_request_snapshot` (ticket JSON အပြည့်) ကိုသာ ချန်ထားသည်။ Column အစဉ်: `run_id` → ticket (`ticket_id` … `township`) → CPE / network (`cpe_id` … `uplink`) → run state (`current_state`, `card`, `bucket`, `api_http_status`, `last_state_reason`, `active_retry_job_id`) → queue / BCS ရလဒ် (`before_queue` … `final_message`) → timestamp (`created_at`, `updated_at`, `completed_at`)။ Column ကို နာမည်ဖြင့် ဖတ်ပါ (နံပါတ်ဖြင့် မဖတ်ပါနှင့်)။
 - Q3 (Not eligible gate breakdown) ကို v2.0 UI တွင် မပြသဖြင့် မထည့်ရသေးပါ။
+
+
+tail -f ~/FrontiirProjects/RT/work_flow_end_to_end/rt_web_ui/.run/pipeline_report.log

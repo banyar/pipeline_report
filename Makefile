@@ -23,3 +23,16 @@ test:
 .PHONY: tidy
 tidy:
 	go mod tidy
+
+# Docker: config from .env, host network (see compose.yaml).
+.PHONY: docker-up
+docker-up:
+	docker compose up -d --build
+
+.PHONY: docker-down
+docker-down:
+	docker compose down
+
+.PHONY: docker-logs
+docker-logs:
+	docker compose logs -f

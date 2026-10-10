@@ -28,7 +28,9 @@ type Config struct {
 	NOCQueue     string
 	Location     *time.Location
 	StuckMinutes int
-	DB           DBConfig
+	// LogSQL logs every query with its arguments filled in.
+	LogSQL bool
+	DB     DBConfig
 }
 
 type DBConfig struct {
@@ -94,6 +96,10 @@ func LoadConfig(envPath string) (Config, error) {
 		return Config{}, fmt.Errorf("REPORT_DB_MAX_OPEN: %w", err)
 	}
 
+	if cfg.LogSQL, err = parseBool(get("REPORT_LOG_SQL", "")); err != nil {
+		return Config{}, fmt.Errorf("REPORT_LOG_SQL: %w", err)
+	}
+
 	var missing []string
 	for _, req := range []struct{ name, value string }{
 		{"MYSQL_DB_HOST", cfg.DB.Host},
@@ -119,4 +125,15 @@ func positiveInt(raw string, fallback int) (int, error) {
 		return 0, fmt.Errorf("%q must be a positive integer", raw)
 	}
 	return n, nil
+}
+
+func parseBool(raw string) (bool, error) {
+	if raw == "" {
+		return false, nil
+	}
+	b, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%q must be true or false", raw)
+	}
+	return b, nil
 }

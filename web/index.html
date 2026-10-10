@@ -54,10 +54,6 @@
   .control { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: 13px; font-weight: 500; text-decoration: none; color: var(--ink-1); }
   a.control:hover, button.control:hover { background: var(--surface); }
   .control svg { width: 14px; height: 14px; stroke: var(--ink-2); fill: none; stroke-width: 2; }
-  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--card); }
-  .seg button { padding: 7px 12px; font-size: 13px; color: var(--ink-2); border: 0; border-right: 1px solid var(--border); background: none; }
-  .seg button:last-child { border-right: 0; }
-  .seg button.on { background: var(--ink-1); color: var(--card); font-weight: 600; }
 
   .banner { display: none; margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; font-size: 13px; border: 1px solid var(--pill-stuck-border); background: var(--wash-critical); color: var(--pill-stuck-ink); }
   .banner.show { display: block; }
@@ -150,7 +146,7 @@
   [data-case].picked { border-color: var(--series-1); box-shadow: 0 0 0 1px var(--series-1); }
   .split .lab [data-case].picked { background: var(--wash-new); box-shadow: none; }
   .back { border: 0; background: none; padding: 0; color: var(--series-1); font-size: 12px; font-weight: 600; }
-  .back[hidden], .seg[hidden] { display: none; }
+  .back[hidden] { display: none; }
   .bucket { display: block; font-size: 11px; color: var(--ink-3); }
   .runs td.reason { white-space: normal; min-width: 220px; max-width: 420px; color: var(--ink-2); overflow-wrap: anywhere; }
   .reason .http { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 600; color: var(--pill-stuck-ink); margin-right: 6px; }
@@ -243,11 +239,6 @@
       <button type="button" class="back" id="back" hidden>← Back to in progress</button>
       <span class="live-badge" id="badge"><span class="pulse"></span><span id="badge-text">LIVE</span></span>
       <div class="spacer"></div>
-      <div class="seg" id="tabs">
-        <button type="button" data-filter="all" class="on">All <span>—</span></button>
-        <button type="button" data-filter="retrying">Retrying <span>—</span></button>
-        <button type="button" data-filter="stuck">Stuck <span>—</span></button>
-      </div>
       <span class="refresh" id="refresh">
         <svg width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--grid)" stroke-width="2.5"/><circle id="ring" cx="10" cy="10" r="8" fill="none" stroke="var(--series-1)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="50.3" stroke-dashoffset="50.3" transform="rotate(-90 10 10)"/></svg>
         <span id="refresh-text">Loading…</span>
@@ -273,14 +264,14 @@
 
 <script>
 (() => {
-  const INTERVAL_MS = 5000, STALE_MS = 15000, NEW_ROW_MS = 3000, STAGES = 8;
+  const INTERVAL_MS = 15000, STALE_MS = 45000, NEW_ROW_MS = 3000, STAGES = 8;
   const ICON_RETRY = '<span class="ico i-warn"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0114-5M20 12a8 8 0 01-14 5"/></svg></span>';
   const ICON_STUCK = '<span class="ico i-crit"><svg viewBox="0 0 24 24"><path d="M12 7v6M12 17h.01"/></svg></span>';
   const WEEKDAY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const MONTH = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   // Each card opens a list of today's runs behind its number. in_progress is
-  // the live list with stepper and retry tabs; the rest show where a run ended
+  // the live list with stepper and retry detail; the rest show where a run ended
   // up and why.
   const CASES = {
     in_progress: ['In progress now', "Today's runs not yet in a terminal state · oldest first"],
@@ -304,7 +295,7 @@
 
   const state = {
     view: 'in_progress', filter: 'all', limit: 50, paused: false, timer: null, tick: null,
-    nextAt: 0, lastOk: 0, lastUpdated: '', seen: null, inflight: false, seq: 0, error: false,
+    nextAt: 0, lastOk: 0, lastUpdated: '', summary: null, seen: null, inflight: false, seq: 0, error: false,
   };
   const $ = id => document.getElementById(id);
 
@@ -348,8 +339,6 @@
     set('s-bcsok-of', `of ${s.success.remote_resolved} remote resolved`);
     set('s-bcsfail', String(s.success.bcs_failed));
 
-    const counts = { all: s.in_progress.total, retrying: s.in_progress.retrying, stuck: s.in_progress.stuck };
-    document.querySelectorAll('#tabs button').forEach(b => { b.querySelector('span').textContent = counts[b.dataset.filter]; });
 
     set('skipped-note', s.skipped ? ` (${s.skipped} today)` : '');
     set('unclassified-note', s.unclassified
@@ -481,7 +470,6 @@
     set('list-title', CASES[view][0]);
     set('list-hint', CASES[view][1]);
     $('back').hidden = live;
-    $('tabs').hidden = !live;
     $('thead').innerHTML = live ? HEAD_LIVE : HEAD_CASE;
     $('rows').innerHTML = loadingRow();
     setExport();
@@ -527,7 +515,9 @@
 
   // force loads once even while paused, so switching lists never leaves the
   // table on "Loading…"; polling still resumes only with Resume.
-  async function refresh(force) {
+  // caseOnly (a card click) skips the summary: only the picked list loads,
+  // and the cards update on the next poll.
+  async function refresh(force, caseOnly) {
     clearTimeout(state.timer);
     state.timer = null;
     if (!force && (state.paused || document.visibilityState === 'hidden')) { renderCountdown(); return; }
@@ -538,17 +528,24 @@
     state.inflight = true;
     renderCountdown();
     try {
-      const params = state.view === 'in_progress'
+      const live = state.view === 'in_progress';
+      let params = live
         ? `filter=${encodeURIComponent(state.filter)}`
         : `case=${encodeURIComponent(state.view)}`;
+      if (caseOnly && !live) params += '&summary=0';
+      params += `&src=${force ? 'click' : 'poll'}`;
       const res = await fetch(`api/v1/pipeline-runs/today?${params}&limit=${state.limit}`, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (seq !== state.seq) return;
-      renderSummary(data.summary);
-      renderRows(data.runs || data.in_progress, data.summary);
+      if (data.summary) {
+        state.summary = data.summary;
+        renderSummary(data.summary);
+      }
+      const list = data.runs || data.in_progress;
+      renderRows(list, state.summary);
       state.lastOk = Date.now();
-      state.lastUpdated = hhmmss(data.summary.generated_at);
+      state.lastUpdated = hhmmss((data.summary || list).generated_at);
       state.error = false;
     } catch (err) {
       if (seq !== state.seq) return;
@@ -566,21 +563,11 @@
     }
   }
 
-  $('tabs').addEventListener('click', e => {
-    const b = e.target.closest('button');
-    if (!b || b.dataset.filter === state.filter) return;
-    state.filter = b.dataset.filter;
-    state.limit = 50;
-    document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
-    setExport();
-    $('rows').innerHTML = loadingRow();
-    refresh(true);
-  });
   // Clicking the picked card again, or Back, returns to the live list.
   const pick = el => {
     showCase(el.dataset.case === state.view ? 'in_progress' : el.dataset.case);
     $('rows').closest('.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    refresh(true);
+    refresh(true, true);
   };
   document.querySelectorAll('[data-case]').forEach(el => {
     el.addEventListener('click', () => pick(el));
@@ -589,7 +576,7 @@
     });
   });
   $('back').addEventListener('click', () => { showCase('in_progress'); refresh(true); });
-  $('more').addEventListener('click', () => { state.limit = 200; refresh(true); });
+  $('more').addEventListener('click', () => { state.limit = 200; refresh(true, true); });
   $('pause').addEventListener('click', () => {
     state.paused = !state.paused;
     setBadge();

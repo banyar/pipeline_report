@@ -47,7 +47,7 @@ func main() {
 		log.Fatalf("connect to MySQL %s:%s/%s: %v", cfg.DB.Host, cfg.DB.Port, cfg.DB.Name, err)
 	}
 
-	srv := &Server{store: &Store{db: db}, loc: cfg.Location, stuckMinutes: cfg.StuckMinutes, nocQueue: cfg.NOCQueue, now: time.Now}
+	srv := &Server{store: &Store{db: db, logSQL: cfg.LogSQL}, loc: cfg.Location, stuckMinutes: cfg.StuckMinutes, nocQueue: cfg.NOCQueue, now: time.Now}
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           srv.Routes(),

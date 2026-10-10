@@ -62,7 +62,8 @@ func NewWindow(now time.Time, stuckMinutes int) Window {
 }
 
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	logSQL bool
 }
 
 // querier is satisfied by *sql.DB and *sql.Tx.
@@ -81,6 +82,9 @@ func (s *Store) Snapshot(ctx context.Context, fn func(q querier) error) error {
 		return fmt.Errorf("begin read-only transaction: %w", err)
 	}
 	defer tx.Rollback()
+	if s.logSQL {
+		return fn(sqlLogger{tx})
+	}
 	return fn(tx)
 }
 
@@ -156,7 +160,7 @@ WHERE pr.created_at >= ? AND pr.created_at < ?`
 
 func querySummary(ctx context.Context, q querier, w Window) (Summary, error) {
 	var r Summary
-	err := q.QueryRowContext(ctx, summaryQuery, w.StuckBefore, w.NOCQueue, w.NOCQueue, w.Start, w.End, w.Start, w.End).Scan(
+	err := q.QueryRowContext(withSQLTitle(ctx, "summary"), summaryQuery, w.StuckBefore, w.NOCQueue, w.NOCQueue, w.Start, w.End, w.Start, w.End).Scan(
 		&r.Received, &r.NotEligible, &r.InProgress, &r.Retrying, &r.Stuck,
 		&r.Success, &r.RemoteResolved, &r.NotRemoteResolved, &r.KeptInNOC, &r.BCSOK, &r.BCSFailed, &r.Finished,
 		&r.ValidationAPI400, &r.ValidationRTUtil,
@@ -229,7 +233,7 @@ LEFT JOIN retry_jobs rj ON rj.id = pr.active_retry_job_id
 WHERE ` + where + `
 ORDER BY pr.created_at ASC
 LIMIT ?`
-	rows, err := q.QueryContext(ctx, query, append(args, limit)...)
+	rows, err := q.QueryContext(withSQLTitle(ctx, "in progress"), query, append(args, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("in-progress query: %w", err)
 	}
@@ -267,19 +271,49 @@ type ExportRun struct {
 	CompletedAt      sql.NullTime
 }
 
-const runColumns = `
+// ExportDetail is an ExportRun plus the pipeline_runs columns only the CSV
+// export shows. rt_request_snapshot (the whole ticket JSON) is left out.
+type ExportDetail struct {
+	ExportRun
+	TicketStatus     sql.NullString
+	TicketCreatedAt  sql.NullTime
+	TicketProblem    sql.NullString
+	Tags             sql.NullString
+	ServiceArea      sql.NullString
+	LocalServiceID   sql.NullString
+	RefBCSProcessID  sql.NullString
+	ONUSerial        sql.NullString
+	OLTHostname      sql.NullString
+	CA1              sql.NullString
+	Uplink           sql.NullString
+	ActiveRetryJobID sql.NullInt64
+	BeforeBCSChannel sql.NullInt64
+	TargetBCSChannel sql.NullInt64
+	FinalMessage     sql.NullString
+}
+
+const runSelect = `
 SELECT pr.run_id, pr.ticket_id, pr.ticket_no, pr.cpe_id, pr.township, COALESCE(pr.current_state, ''),
        pr.before_queue, pr.target_queue, rej.http_status, pr.is_remote_resolved, pr.is_bcs_success, pr.bcs_status_message, pr.last_state_reason,
-       pr.created_at, pr.updated_at, pr.completed_at
+       pr.created_at, pr.updated_at, pr.completed_at`
+
+const runFrom = `
 FROM pipeline_runs pr` + rejectedStatus + `
 WHERE pr.created_at >= ? AND pr.created_at < ?`
 
-func queryTodayRuns(ctx context.Context, q querier, w Window) ([]ExportRun, error) {
-	rows, err := q.QueryContext(ctx, runColumns+` ORDER BY pr.created_at ASC`, w.Start, w.End, w.Start, w.End)
+const runColumns = runSelect + runFrom
+
+const exportColumns = runSelect + `,
+       pr.ticket_status, pr.ticket_created_at, pr.ticket_problem, pr.tags, pr.service_area,
+       pr.local_service_id, pr.ref_bcs_process_id, pr.onu_serial, pr.olt_hostname, pr.ca1, pr.uplink,
+       pr.active_retry_job_id, pr.before_bcs_channel, pr.target_bcs_channel, pr.final_message` + runFrom
+
+func queryTodayRuns(ctx context.Context, q querier, w Window) ([]ExportDetail, error) {
+	rows, err := q.QueryContext(withSQLTitle(ctx, "export today"), exportColumns+` ORDER BY pr.created_at ASC`, w.Start, w.End, w.Start, w.End)
 	if err != nil {
 		return nil, fmt.Errorf("export query: %w", err)
 	}
-	return scanRuns(rows, "export")
+	return scanExport(rows, "export")
 }
 
 // Case is a report card the page can open as a list of today's runs. The
@@ -342,6 +376,22 @@ func caseWhere(w Window, c Case, f Filter) (string, []any, error) {
 	return cond.sql, nil, nil
 }
 
+// queryCaseCount counts today's runs of one case: a card click that skips
+// the summary still needs the list's total.
+func queryCaseCount(ctx context.Context, q querier, w Window, c Case) (int, error) {
+	cond, condArgs, err := caseWhere(w, c, FilterAll)
+	if err != nil {
+		return 0, err
+	}
+	args := append([]any{w.Start, w.End, w.Start, w.End}, condArgs...)
+	var n int
+	err = q.QueryRowContext(withSQLTitle(ctx, "case "+string(c)+" count"), `SELECT COUNT(*)`+runFrom+` AND `+cond, args...).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("case %s count: %w", c, err)
+	}
+	return n, nil
+}
+
 // queryCaseRuns lists today's runs of one case, newest first.
 func queryCaseRuns(ctx context.Context, q querier, w Window, c Case, limit int) ([]ExportRun, error) {
 	cond, condArgs, err := caseWhere(w, c, FilterAll)
@@ -350,7 +400,7 @@ func queryCaseRuns(ctx context.Context, q querier, w Window, c Case, limit int) 
 	}
 	args := append([]any{w.Start, w.End, w.Start, w.End}, condArgs...)
 	query := runColumns + ` AND ` + cond + ` ORDER BY pr.created_at DESC LIMIT ?`
-	rows, err := q.QueryContext(ctx, query, append(args, limit)...)
+	rows, err := q.QueryContext(withSQLTitle(ctx, "case "+string(c)+" runs"), query, append(args, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("case %s query: %w", c, err)
 	}
@@ -359,17 +409,17 @@ func queryCaseRuns(ctx context.Context, q querier, w Window, c Case, limit int) 
 
 // queryCaseExport is every one of today's runs of one case, oldest first, for
 // the CSV export of the list the page is showing.
-func queryCaseExport(ctx context.Context, q querier, w Window, c Case, f Filter) ([]ExportRun, error) {
+func queryCaseExport(ctx context.Context, q querier, w Window, c Case, f Filter) ([]ExportDetail, error) {
 	cond, condArgs, err := caseWhere(w, c, f)
 	if err != nil {
 		return nil, err
 	}
 	args := append([]any{w.Start, w.End, w.Start, w.End}, condArgs...)
-	rows, err := q.QueryContext(ctx, runColumns+` AND `+cond+` ORDER BY pr.created_at ASC`, args...)
+	rows, err := q.QueryContext(withSQLTitle(ctx, "case "+string(c)+" export"), exportColumns+` AND `+cond+` ORDER BY pr.created_at ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("case %s export query: %w", c, err)
 	}
-	return scanRuns(rows, "case "+string(c)+" export")
+	return scanExport(rows, "case "+string(c)+" export")
 }
 
 func scanRuns(rows *sql.Rows, what string) ([]ExportRun, error) {
@@ -380,6 +430,24 @@ func scanRuns(rows *sql.Rows, what string) ([]ExportRun, error) {
 		if err := rows.Scan(&r.RunID, &r.TicketID, &r.TicketNo, &r.CpeID, &r.Township, &r.State,
 			&r.BeforeQueue, &r.TargetQueue, &r.HTTPStatus, &r.IsRemoteResolved, &r.IsBCSSuccess, &r.BCSStatusMessage, &r.LastStateReason,
 			&r.CreatedAt, &r.UpdatedAt, &r.CompletedAt); err != nil {
+			return nil, fmt.Errorf("%s scan: %w", what, err)
+		}
+		runs = append(runs, r)
+	}
+	return runs, rows.Err()
+}
+
+func scanExport(rows *sql.Rows, what string) ([]ExportDetail, error) {
+	defer rows.Close()
+	runs := []ExportDetail{}
+	for rows.Next() {
+		var r ExportDetail
+		if err := rows.Scan(&r.RunID, &r.TicketID, &r.TicketNo, &r.CpeID, &r.Township, &r.State,
+			&r.BeforeQueue, &r.TargetQueue, &r.HTTPStatus, &r.IsRemoteResolved, &r.IsBCSSuccess, &r.BCSStatusMessage, &r.LastStateReason,
+			&r.CreatedAt, &r.UpdatedAt, &r.CompletedAt,
+			&r.TicketStatus, &r.TicketCreatedAt, &r.TicketProblem, &r.Tags, &r.ServiceArea,
+			&r.LocalServiceID, &r.RefBCSProcessID, &r.ONUSerial, &r.OLTHostname, &r.CA1, &r.Uplink,
+			&r.ActiveRetryJobID, &r.BeforeBCSChannel, &r.TargetBCSChannel, &r.FinalMessage); err != nil {
 			return nil, fmt.Errorf("%s scan: %w", what, err)
 		}
 		runs = append(runs, r)

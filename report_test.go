@@ -188,3 +188,13 @@ func TestCaseWhere(t *testing.T) {
 		t.Error("caseWhere(skipped) accepted")
 	}
 }
+
+func TestInterpolateSQL(t *testing.T) {
+	at := time.Date(2026, 10, 9, 8, 30, 0, 0, time.UTC)
+	got := interpolateSQL(` SELECT '?' FROM t WHERE a = ? AND b >= ? AND c = ? LIMIT ? `,
+		[]any{"NOC's", at, true, 50})
+	want := `SELECT '?' FROM t WHERE a = 'NOC''s' AND b >= '2026-10-09 08:30:00' AND c = 1 LIMIT 50`
+	if got != want {
+		t.Errorf("interpolateSQL:\n got %s\nwant %s", got, want)
+	}
+}

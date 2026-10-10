@@ -32,7 +32,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/pipeline-runs/today/in-progress", s.handleInProgress)
 	mux.HandleFunc("GET /api/v1/pipeline-runs/today/export.csv", s.handleExport)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
-	return mux
+	return withSQLRequest(mux)
 }
 
 // window fixes "today" and "now" on the server clock, never the browser's.
@@ -43,7 +43,7 @@ func (s *Server) window() Window {
 }
 
 // handleToday serves the summary and one list measured at one instant, which
-// is what the page polls every 5 seconds. The list is the live in-progress
+// is what the page polls every 15 seconds. The list is the live in-progress
 // one ("in_progress"), or with ?case= the runs behind another card ("runs").
 func (s *Server) handleToday(w http.ResponseWriter, r *http.Request) {
 	f, limit, ok := listParams(w, r)
@@ -53,6 +53,12 @@ func (s *Server) handleToday(w http.ResponseWriter, r *http.Request) {
 	c, ok := ParseCase(r.URL.Query().Get("case"))
 	if !ok {
 		http.Error(w, "unknown case", http.StatusBadRequest)
+		return
+	}
+	// A card click (?summary=0) reloads only that case's list; the cards
+	// catch up on the next poll.
+	if c != CaseInProgress && r.URL.Query().Get("summary") == "0" {
+		s.handleCaseOnly(w, r, c, limit)
 		return
 	}
 	win := s.window()
@@ -95,6 +101,38 @@ func (s *Server) handleToday(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"summary":     summary,
 		"in_progress": live,
+	})
+}
+
+// handleCaseOnly answers a card click with the case list and its count, no
+// summary.
+func (s *Server) handleCaseOnly(w http.ResponseWriter, r *http.Request, c Case, limit int) {
+	win := s.window()
+	var total int
+	var runs []ExportRun
+	err := s.store.Snapshot(r.Context(), func(q querier) (err error) {
+		if total, err = queryCaseCount(r.Context(), q, win, c); err != nil {
+			return err
+		}
+		runs, err = queryCaseRuns(r.Context(), q, win, c, limit)
+		return err
+	})
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	items := make([]RunItem, 0, len(runs))
+	for _, run := range runs {
+		items = append(items, newRunItem(run))
+	}
+	writeJSON(w, map[string]any{
+		"runs": CaseResponse{
+			GeneratedAt: win.Now.Format(wireTime),
+			Case:        c,
+			Total:       total,
+			Limit:       limit,
+			Items:       items,
+		},
 	})
 }
 
@@ -175,7 +213,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 			name += "-" + string(f)
 		}
 	}
-	var runs []ExportRun
+	var runs []ExportDetail
 	err := s.store.Snapshot(r.Context(), func(q querier) (err error) {
 		if rawCase == "" {
 			runs, err = queryTodayRuns(r.Context(), q, win)
@@ -193,18 +231,18 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		`attachment; filename="`+name+`.csv"`)
 
 	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"run_id", "ticket_id", "ticket_no", "cpe_id", "township", "current_state", "card", "bucket", "before_queue", "target_queue",
-		"api_http_status", "is_remote_resolved", "is_bcs_success", "bcs_status_message", "last_state_reason",
-		"created_at", "updated_at", "completed_at"})
+	header := make([]string, len(exportCSV))
+	for i, c := range exportCSV {
+		header[i] = c.name
+	}
+	_ = cw.Write(header)
+	row := make([]string, len(exportCSV))
 	for _, run := range runs {
 		b := bucket(run.State, run.CompletedAt.Valid, run.HTTPStatus.Int64)
-		_ = cw.Write([]string{
-			run.RunID, nullInt(run.TicketID), run.TicketNo.String, run.CpeID.String, run.Township.String,
-			run.State, card(b), b, run.BeforeQueue.String, run.TargetQueue.String,
-			nullInt(run.HTTPStatus), nullBool(run.IsRemoteResolved), nullBool(run.IsBCSSuccess),
-			run.BCSStatusMessage.String, run.LastStateReason.String,
-			run.CreatedAt.Format(wireTime), nullTime(run.UpdatedAt), nullTime(run.CompletedAt),
-		})
+		for i, c := range exportCSV {
+			row[i] = c.value(run, b)
+		}
+		_ = cw.Write(row)
 	}
 	cw.Flush()
 	if err := cw.Error(); err != nil {
@@ -253,4 +291,51 @@ func writeJSON(w http.ResponseWriter, v any) {
 func serverError(w http.ResponseWriter, err error) {
 	log.Printf("error: %v", err)
 	http.Error(w, "report query failed", http.StatusInternalServerError)
+}
+
+// exportCSV is the CSV export's columns in order: the ticket, the CPE and
+// network, the run's state, the queue / BCS outcome, then the timestamps.
+// b is the run's bucket.
+var exportCSV = []struct {
+	name  string
+	value func(r ExportDetail, b string) string
+}{
+	{"run_id", func(r ExportDetail, _ string) string { return r.RunID }},
+	// ticket
+	{"ticket_id", func(r ExportDetail, _ string) string { return nullInt(r.TicketID) }},
+	{"ticket_no", func(r ExportDetail, _ string) string { return r.TicketNo.String }},
+	{"ticket_status", func(r ExportDetail, _ string) string { return r.TicketStatus.String }},
+	{"ticket_created_at", func(r ExportDetail, _ string) string { return nullTime(r.TicketCreatedAt) }},
+	{"ticket_problem", func(r ExportDetail, _ string) string { return r.TicketProblem.String }},
+	{"tags", func(r ExportDetail, _ string) string { return r.Tags.String }},
+	{"service_area", func(r ExportDetail, _ string) string { return r.ServiceArea.String }},
+	{"township", func(r ExportDetail, _ string) string { return r.Township.String }},
+	// CPE and network
+	{"cpe_id", func(r ExportDetail, _ string) string { return r.CpeID.String }},
+	{"local_service_id", func(r ExportDetail, _ string) string { return r.LocalServiceID.String }},
+	{"ref_bcs_process_id", func(r ExportDetail, _ string) string { return r.RefBCSProcessID.String }},
+	{"onu_serial", func(r ExportDetail, _ string) string { return r.ONUSerial.String }},
+	{"olt_hostname", func(r ExportDetail, _ string) string { return r.OLTHostname.String }},
+	{"ca1", func(r ExportDetail, _ string) string { return r.CA1.String }},
+	{"uplink", func(r ExportDetail, _ string) string { return r.Uplink.String }},
+	// run state
+	{"current_state", func(r ExportDetail, _ string) string { return r.State }},
+	{"card", func(_ ExportDetail, b string) string { return card(b) }},
+	{"bucket", func(_ ExportDetail, b string) string { return b }},
+	{"api_http_status", func(r ExportDetail, _ string) string { return nullInt(r.HTTPStatus) }},
+	{"last_state_reason", func(r ExportDetail, _ string) string { return r.LastStateReason.String }},
+	{"active_retry_job_id", func(r ExportDetail, _ string) string { return nullInt(r.ActiveRetryJobID) }},
+	// queue and BCS outcome
+	{"before_queue", func(r ExportDetail, _ string) string { return r.BeforeQueue.String }},
+	{"target_queue", func(r ExportDetail, _ string) string { return r.TargetQueue.String }},
+	{"before_bcs_channel", func(r ExportDetail, _ string) string { return nullInt(r.BeforeBCSChannel) }},
+	{"target_bcs_channel", func(r ExportDetail, _ string) string { return nullInt(r.TargetBCSChannel) }},
+	{"is_remote_resolved", func(r ExportDetail, _ string) string { return nullBool(r.IsRemoteResolved) }},
+	{"is_bcs_success", func(r ExportDetail, _ string) string { return nullBool(r.IsBCSSuccess) }},
+	{"bcs_status_message", func(r ExportDetail, _ string) string { return r.BCSStatusMessage.String }},
+	{"final_message", func(r ExportDetail, _ string) string { return r.FinalMessage.String }},
+	// timestamps
+	{"created_at", func(r ExportDetail, _ string) string { return r.CreatedAt.Format(wireTime) }},
+	{"updated_at", func(r ExportDetail, _ string) string { return nullTime(r.UpdatedAt) }},
+	{"completed_at", func(r ExportDetail, _ string) string { return nullTime(r.CompletedAt) }},
 }
