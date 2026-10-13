@@ -60,7 +60,7 @@ Pipeline service များ (rtdatacore DSN `loc=Local`) သည် DATETIME �
 |---|---|
 | `GET /` | Report UI (15 စက္ကန့်တစ်ကြိမ် refresh) |
 | `GET /api/v1/pipeline-runs/today?filter=&limit=` | Summary + live list ကို အချိန်တစ်ခုတည်းဖြင့် — UI က ဤ endpoint ကို poll လုပ်သည် |
-| `GET /api/v1/pipeline-runs/today?case=&limit=` | Summary + card တစ်ခု၏ run list (`runs`) — state, queue, BCS, reason ပါသည်။ case: `received`, `success`, `remote_resolved`, `transferred`, `kept_in_noc`, `bcs_ok`, `bcs_failed`, `not_eligible`, `manual_check` (မပါ/`in_progress` ဆိုလျှင် live list) |
+| `GET /api/v1/pipeline-runs/today?case=&limit=` | Summary + card တစ်ခု၏ run list (`runs`) — state, queue, BCS, reason ပါသည်။ case: `received`, `success`, `remote_resolved`, `transferred`, `kept_in_noc`, `bcs_ok`, `bcs_failed`, `bcs_pending`, `not_eligible`, `manual_check` (မပါ/`in_progress` ဆိုလျှင် live list) |
 | `GET /api/v1/pipeline-runs/today?case=&summary=0&limit=` | Card နှိပ်ချိန် — summary မပါဘဲ card ၏ run list နှင့် `COUNT(*)` သာ (`runs.total`)။ Card များကို နောက် poll တွင် update လုပ်သည် |
 | `GET /api/v1/pipeline-runs/today/summary` | Spec ၏ Q1 (§10 JSON) |
 | `GET /api/v1/pipeline-runs/today/in-progress?filter=all\|retrying\|stuck&limit=` | Spec ၏ Q2 (limit default 50, max 200) |
@@ -116,10 +116,12 @@ Card ဂဏန်းအားလုံးကို `FROM pipeline_runs pr <rej j
 | Transferred | summary တွင် (not remote resolved) − (kept in NOC)။ List တွင် `COMPLETED AND COALESCE(is_remote_resolved,0) = 0 AND NOT COALESCE(TRIM(before_queue) = :noc AND TRIM(target_queue) = :noc, FALSE)` |
 | BCS updated | `COMPLETED AND is_remote_resolved = 1 AND is_bcs_success = 1` |
 | Resolved, BCS failed | `COMPLETED AND is_remote_resolved = 1 AND is_bcs_success = 0` |
+| BCS pending | `COMPLETED AND is_remote_resolved = 1 AND COALESCE(ref_bcs_process_id,'') <> '' AND is_bcs_success IS NULL` |
 
 - `:noc` = `REPORT_NOC_QUEUE`။
 - Transferred list ၏ `COALESCE(..., FALSE)` ကြောင့် queue တစ်ခုခု NULL ဖြစ်သော run သည် summary ၏ နုတ်တွက်နည်းကဲ့သို့ပင် transferred ထဲ ကျသည်။
-- `is_bcs_success` NULL ဖြစ်သော remote resolved run သည် BCS updated / BCS failed နှစ်ခုလုံးတွင် မပါ။
+- BCS က async ဖြစ်လို့ rtutil က Peppermint job ကို စခိုင်းပြီး `ref_bcs_process_id` (job_id) ကိုပဲ သိမ်းသည်။ ရလဒ်ကို rt-external-api ၏ webhook / status poll က နောက်မှ ဖြည့်သည်။ ထိုကြားကာလ (`is_bcs_success` NULL) ကို **BCS pending** တွင် ပြသည်။ ဒီ number က ကြာကြာ များနေရင် webhook / sweeper ကို စစ်ပါ။
+- `ref_bcs_process_id` မရှိဘဲ `is_bcs_success` NULL ဖြစ်သော remote resolved run (BCS မခေါ်ဖြစ်) သည် card သုံးခုလုံးတွင် မပါ။
 
 ### Manual check
 
@@ -171,7 +173,7 @@ LIMIT :limit
 - Case condition သည် အထက်ပါ card condition များ ဖြစ်သည် (`received` = `TRUE`)။ URL `#case=<case>` ဖြင့် ရွေးထားသော card ကို reload / share လုပ်နိုင်သည်။
 - **State** — `current_state` နှင့် Go ၏ `bucket()` (validation failed / API error / failed …) tag။
 - **Queue** — `before_queue → target_queue`။
-- **BCS** — `is_bcs_success`။ Failed ဖြစ်လျှင် `bcs_status_message` (CPEMS/BCS error) ကိုပါ ပြသည်။
+- **BCS** — `is_bcs_success` (ok / failed / pending)။ Channel ရှိလျှင် `ch before_bcs_channel → target_bcs_channel`၊ failed ဖြစ်လျှင် `bcs_status_message` (Peppermint error code: message) ကိုပါ ပြသည်။
 - **Reason** — `last_state_reason`။ API_REJECTED ဖြစ်လျှင် ရှေ့တွင် `HTTP <rej.http_status>`။
 - **Completed** — `completed_at` နှင့် ကြာချိန် (`completed_at − created_at`)။
 

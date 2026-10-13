@@ -33,6 +33,9 @@ const (
 	condTransferred = condNotRemote + ` AND NOT COALESCE(` + condInNOC + `, FALSE)`
 	condBCSOK       = condRemote + ` AND pr.is_bcs_success = 1`
 	condBCSFailed   = condRemote + ` AND pr.is_bcs_success = 0`
+	// BCS job queued at Peppermint (rtutil stored its job_id) with no result
+	// yet: the webhook or rt-external-api's status poll fills it in later.
+	condBCSPending  = condRemote + ` AND COALESCE(pr.ref_bcs_process_id, '') <> '' AND pr.is_bcs_success IS NULL`
 	condNotEligible = `pr.current_state IN ('NOT_ELIGIBLE','ALREADY_PROCESSED')`
 	// Validation failed + API error + failed, whatever the http_status.
 	condManualCheck = `pr.current_state IN ('API_REJECTED','API_UNREACHABLE','CONSUME_VALIDATION_FAILED',
@@ -101,6 +104,7 @@ type Summary struct {
 	KeptInNOC         int `json:"kept_in_noc"`
 	BCSOK             int `json:"bcs_ok"`
 	BCSFailed         int `json:"bcs_failed"`
+	BCSPending        int `json:"bcs_pending"`
 	Finished          int `json:"finished"`
 	ValidationAPI400  int `json:"validation_api_400"`
 	ValidationRTUtil  int `json:"validation_rtutil"`
@@ -143,6 +147,7 @@ SELECT
   COALESCE(SUM(` + condKeptInNOC + `), 0),
   COALESCE(SUM(` + condBCSOK + `), 0),
   COALESCE(SUM(` + condBCSFailed + `), 0),
+  COALESCE(SUM(` + condBCSPending + `), 0),
   COALESCE(SUM(pr.current_state IN (` + finishedStates + `)), 0),
   COALESCE(SUM(pr.current_state = 'API_REJECTED' AND rej.http_status = 400), 0),
   COALESCE(SUM(pr.current_state = 'CONSUME_VALIDATION_FAILED'), 0),
@@ -162,7 +167,7 @@ func querySummary(ctx context.Context, q querier, w Window) (Summary, error) {
 	var r Summary
 	err := q.QueryRowContext(withSQLTitle(ctx, "summary"), summaryQuery, w.StuckBefore, w.NOCQueue, w.NOCQueue, w.Start, w.End, w.Start, w.End).Scan(
 		&r.Received, &r.NotEligible, &r.InProgress, &r.Retrying, &r.Stuck,
-		&r.Success, &r.RemoteResolved, &r.NotRemoteResolved, &r.KeptInNOC, &r.BCSOK, &r.BCSFailed, &r.Finished,
+		&r.Success, &r.RemoteResolved, &r.NotRemoteResolved, &r.KeptInNOC, &r.BCSOK, &r.BCSFailed, &r.BCSPending, &r.Finished,
 		&r.ValidationAPI400, &r.ValidationRTUtil,
 		&r.APIError409, &r.APIErrorOther, &r.APIUnreachable,
 		&r.FailedPermanent, &r.CPENotFound, &r.RTUpdateFailed,
@@ -265,6 +270,9 @@ type ExportRun struct {
 	IsRemoteResolved sql.NullBool
 	IsBCSSuccess     sql.NullBool
 	BCSStatusMessage sql.NullString
+	RefBCSProcessID  sql.NullString
+	BeforeBCSChannel sql.NullInt64
+	TargetBCSChannel sql.NullInt64
 	LastStateReason  sql.NullString
 	CreatedAt        time.Time
 	UpdatedAt        sql.NullTime
@@ -281,20 +289,18 @@ type ExportDetail struct {
 	Tags             sql.NullString
 	ServiceArea      sql.NullString
 	LocalServiceID   sql.NullString
-	RefBCSProcessID  sql.NullString
 	ONUSerial        sql.NullString
 	OLTHostname      sql.NullString
 	CA1              sql.NullString
 	Uplink           sql.NullString
 	ActiveRetryJobID sql.NullInt64
-	BeforeBCSChannel sql.NullInt64
-	TargetBCSChannel sql.NullInt64
 	FinalMessage     sql.NullString
 }
 
 const runSelect = `
 SELECT pr.run_id, pr.ticket_id, pr.ticket_no, pr.cpe_id, pr.township, COALESCE(pr.current_state, ''),
-       pr.before_queue, pr.target_queue, rej.http_status, pr.is_remote_resolved, pr.is_bcs_success, pr.bcs_status_message, pr.last_state_reason,
+       pr.before_queue, pr.target_queue, rej.http_status, pr.is_remote_resolved, pr.is_bcs_success, pr.bcs_status_message,
+       pr.ref_bcs_process_id, pr.before_bcs_channel, pr.target_bcs_channel, pr.last_state_reason,
        pr.created_at, pr.updated_at, pr.completed_at`
 
 const runFrom = `
@@ -305,8 +311,8 @@ const runColumns = runSelect + runFrom
 
 const exportColumns = runSelect + `,
        pr.ticket_status, pr.ticket_created_at, pr.ticket_problem, pr.tags, pr.service_area,
-       pr.local_service_id, pr.ref_bcs_process_id, pr.onu_serial, pr.olt_hostname, pr.ca1, pr.uplink,
-       pr.active_retry_job_id, pr.before_bcs_channel, pr.target_bcs_channel, pr.final_message` + runFrom
+       pr.local_service_id, pr.onu_serial, pr.olt_hostname, pr.ca1, pr.uplink,
+       pr.active_retry_job_id, pr.final_message` + runFrom
 
 func queryTodayRuns(ctx context.Context, q querier, w Window) ([]ExportDetail, error) {
 	rows, err := q.QueryContext(withSQLTitle(ctx, "export today"), exportColumns+` ORDER BY pr.created_at ASC`, w.Start, w.End, w.Start, w.End)
@@ -329,6 +335,7 @@ const (
 	CaseKeptInNOC      Case = "kept_in_noc"
 	CaseBCSOK          Case = "bcs_ok"
 	CaseBCSFailed      Case = "bcs_failed"
+	CaseBCSPending     Case = "bcs_pending"
 	CaseNotEligible    Case = "not_eligible"
 	CaseManualCheck    Case = "manual_check"
 )
@@ -346,6 +353,7 @@ var caseCond = map[Case]struct {
 	CaseKeptInNOC:      {sql: condKeptInNOC, inNOC: true},
 	CaseBCSOK:          {sql: condBCSOK},
 	CaseBCSFailed:      {sql: condBCSFailed},
+	CaseBCSPending:     {sql: condBCSPending},
 	CaseNotEligible:    {sql: condNotEligible},
 	CaseManualCheck:    {sql: condManualCheck},
 }
@@ -428,7 +436,8 @@ func scanRuns(rows *sql.Rows, what string) ([]ExportRun, error) {
 	for rows.Next() {
 		var r ExportRun
 		if err := rows.Scan(&r.RunID, &r.TicketID, &r.TicketNo, &r.CpeID, &r.Township, &r.State,
-			&r.BeforeQueue, &r.TargetQueue, &r.HTTPStatus, &r.IsRemoteResolved, &r.IsBCSSuccess, &r.BCSStatusMessage, &r.LastStateReason,
+			&r.BeforeQueue, &r.TargetQueue, &r.HTTPStatus, &r.IsRemoteResolved, &r.IsBCSSuccess, &r.BCSStatusMessage,
+			&r.RefBCSProcessID, &r.BeforeBCSChannel, &r.TargetBCSChannel, &r.LastStateReason,
 			&r.CreatedAt, &r.UpdatedAt, &r.CompletedAt); err != nil {
 			return nil, fmt.Errorf("%s scan: %w", what, err)
 		}
@@ -443,11 +452,12 @@ func scanExport(rows *sql.Rows, what string) ([]ExportDetail, error) {
 	for rows.Next() {
 		var r ExportDetail
 		if err := rows.Scan(&r.RunID, &r.TicketID, &r.TicketNo, &r.CpeID, &r.Township, &r.State,
-			&r.BeforeQueue, &r.TargetQueue, &r.HTTPStatus, &r.IsRemoteResolved, &r.IsBCSSuccess, &r.BCSStatusMessage, &r.LastStateReason,
+			&r.BeforeQueue, &r.TargetQueue, &r.HTTPStatus, &r.IsRemoteResolved, &r.IsBCSSuccess, &r.BCSStatusMessage,
+			&r.RefBCSProcessID, &r.BeforeBCSChannel, &r.TargetBCSChannel, &r.LastStateReason,
 			&r.CreatedAt, &r.UpdatedAt, &r.CompletedAt,
 			&r.TicketStatus, &r.TicketCreatedAt, &r.TicketProblem, &r.Tags, &r.ServiceArea,
-			&r.LocalServiceID, &r.RefBCSProcessID, &r.ONUSerial, &r.OLTHostname, &r.CA1, &r.Uplink,
-			&r.ActiveRetryJobID, &r.BeforeBCSChannel, &r.TargetBCSChannel, &r.FinalMessage); err != nil {
+			&r.LocalServiceID, &r.ONUSerial, &r.OLTHostname, &r.CA1, &r.Uplink,
+			&r.ActiveRetryJobID, &r.FinalMessage); err != nil {
 			return nil, fmt.Errorf("%s scan: %w", what, err)
 		}
 		runs = append(runs, r)

@@ -91,7 +91,7 @@
   .split .bar div:last-child { border-radius: 0 4px 4px 0; }
   .split .lab { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; font-size: 13px; }
   .split .crit { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; color: var(--ink-3); margin-top: 4px; line-height: 1.4; overflow-wrap: anywhere; }
-  .stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
   .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
   .stat .k { font-size: 12px; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
   .stat .v { font-size: 20px; font-weight: 650; margin-top: 2px; }
@@ -228,6 +228,7 @@
         <div class="stat-grid">
           <div class="stat" data-case="bcs_ok" role="button" tabindex="0"><div class="k"><span class="ico i-good"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg></span>BCS updated</div><div class="v"><span id="s-bcsok">—</span><small id="s-bcsok-of"></small></div></div>
           <div class="stat" data-case="bcs_failed" role="button" tabindex="0"><div class="k"><span class="ico i-serious"><svg viewBox="0 0 24 24"><path d="M12 7v6M12 17h.01"/></svg></span>Resolved, BCS failed</div><div class="v"><span id="s-bcsfail">—</span><small>needs follow-up</small></div></div>
+          <div class="stat" data-case="bcs_pending" role="button" tabindex="0"><div class="k"><span class="ico i-warn"><svg viewBox="0 0 24 24"><path d="M12 7v5l3 3"/></svg></span>BCS pending</div><div class="v"><span id="s-bcspending">—</span><small>job queued, no result yet</small></div></div>
         </div>
       </div>
     </div>
@@ -282,6 +283,7 @@
     kept_in_noc: ['Kept in NOC', 'COMPLETED, left in the NOC queue for NOC to follow up · newest first'],
     bcs_ok: ['BCS updated', 'Remote resolved and BCS updated · newest first'],
     bcs_failed: ['Resolved, BCS failed', 'Remote resolved but the BCS update failed · needs follow-up · newest first'],
+    bcs_pending: ['BCS pending', 'Remote resolved, BCS job queued at Peppermint, result not in yet · newest first'],
     not_eligible: ['Not eligible', 'Workflow gate failed · reason shows which check · newest first'],
     manual_check: ['Manual check', 'Ended without automation finishing · reason shows why · newest first'],
   };
@@ -338,6 +340,7 @@
     set('s-bcsok', String(s.success.bcs_ok));
     set('s-bcsok-of', `of ${s.success.remote_resolved} remote resolved`);
     set('s-bcsfail', String(s.success.bcs_failed));
+    set('s-bcspending', String(s.success.bcs_pending));
 
 
     set('skipped-note', s.skipped ? ` (${s.skipped} today)` : '');
@@ -365,10 +368,14 @@
     const queue = it.before_queue || it.target_queue
       ? `<span class="q">${esc(it.before_queue) || '—'} → ${esc(it.target_queue) || '—'}</span>`
       : '<span class="muted">—</span>';
-    const bcs = it.is_bcs_success === null || it.is_remote_resolved !== true
-      ? '<span class="muted">—</span>'
-      : it.is_bcs_success ? '<span class="ok">ok</span>'
-      : `<span class="bad">failed</span>${it.bcs_status_message ? `<span class="bcs-msg">${esc(it.bcs_status_message)}</span>` : ''}`;
+    const channel = it.before_bcs_channel !== null
+      ? `<span class="bcs-msg">ch ${esc(it.before_bcs_channel)} → ${it.target_bcs_channel !== null ? esc(it.target_bcs_channel) : '—'}</span>`
+      : '';
+    const bcs = it.is_remote_resolved !== true ? '<span class="muted">—</span>'
+      : it.is_bcs_success === null
+        ? (it.bcs_job_id ? '<span class="muted">pending</span>' : '<span class="muted">—</span>')
+      : it.is_bcs_success ? `<span class="ok">ok</span>${channel}`
+      : `<span class="bad">failed</span>${channel}${it.bcs_status_message ? `<span class="bcs-msg">${esc(it.bcs_status_message)}</span>` : ''}`;
     const http = it.http_status !== null ? `<span class="http">HTTP ${esc(it.http_status)}</span>` : '';
     const reason = http || it.reason ? `${http}${esc(it.reason)}` : '<span class="muted">—</span>';
     const done = it.completed_at

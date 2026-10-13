@@ -100,6 +100,8 @@ type SummaryResponse struct {
 		KeptInNOC      int `json:"kept_in_noc"`
 		BCSOK          int `json:"bcs_ok"`
 		BCSFailed      int `json:"bcs_failed"`
+		// BCSPending: BCS job queued, result not in yet (webhook / poll).
+		BCSPending int `json:"bcs_pending"`
 	} `json:"success"`
 	NotEligible      int `json:"not_eligible"`
 	ValidationFailed struct {
@@ -144,7 +146,7 @@ func newSummaryResponse(w Window, s Summary) SummaryResponse {
 	// (before_queue = target_queue = NOC) for NOC to follow up.
 	r.Success.RemoteResolved, r.Success.KeptInNOC = s.RemoteResolved, s.KeptInNOC
 	r.Success.Transferred = s.NotRemoteResolved - s.KeptInNOC
-	r.Success.BCSOK, r.Success.BCSFailed = s.BCSOK, s.BCSFailed
+	r.Success.BCSOK, r.Success.BCSFailed, r.Success.BCSPending = s.BCSOK, s.BCSFailed, s.BCSPending
 
 	r.ValidationFailed.API400, r.ValidationFailed.RTUtil = s.ValidationAPI400, s.ValidationRTUtil
 	r.ValidationFailed.Total = s.ValidationAPI400 + s.ValidationRTUtil
@@ -237,6 +239,9 @@ type RunItem struct {
 	IsRemoteResolved *bool   `json:"is_remote_resolved"`
 	IsBCSSuccess     *bool   `json:"is_bcs_success"`
 	BCSStatusMessage string  `json:"bcs_status_message"` // CPEMS/BCS error when is_bcs_success is false
+	BCSJobID         string  `json:"bcs_job_id"`         // Peppermint job_id; "" when BCS was never queued
+	BeforeBCSChannel *int64  `json:"before_bcs_channel"`
+	TargetBCSChannel *int64  `json:"target_bcs_channel"`
 	Reason           string  `json:"reason"`
 	StartedAt        string  `json:"started_at"`
 	CompletedAt      *string `json:"completed_at"`
@@ -262,6 +267,7 @@ func newRunItem(r ExportRun) RunItem {
 		BeforeQueue:      r.BeforeQueue.String,
 		TargetQueue:      r.TargetQueue.String,
 		BCSStatusMessage: r.BCSStatusMessage.String,
+		BCSJobID:         r.RefBCSProcessID.String,
 		Reason:           r.LastStateReason.String,
 		StartedAt:        r.CreatedAt.Format(wireTime),
 	}
@@ -276,6 +282,12 @@ func newRunItem(r ExportRun) RunItem {
 	}
 	if r.IsBCSSuccess.Valid {
 		it.IsBCSSuccess = &r.IsBCSSuccess.Bool
+	}
+	if r.BeforeBCSChannel.Valid {
+		it.BeforeBCSChannel = &r.BeforeBCSChannel.Int64
+	}
+	if r.TargetBCSChannel.Valid {
+		it.TargetBCSChannel = &r.TargetBCSChannel.Int64
 	}
 	if r.CompletedAt.Valid {
 		s := r.CompletedAt.Time.Format(wireTime)
@@ -302,6 +314,8 @@ func caseTotal(r SummaryResponse, c Case) int {
 		return r.Success.BCSOK
 	case CaseBCSFailed:
 		return r.Success.BCSFailed
+	case CaseBCSPending:
+		return r.Success.BCSPending
 	case CaseNotEligible:
 		return r.NotEligible
 	case CaseManualCheck:

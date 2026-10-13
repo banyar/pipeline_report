@@ -122,7 +122,8 @@ func TestNewSummaryResponseSuccessSplit(t *testing.T) {
 
 func TestParseCase(t *testing.T) {
 	for in, want := range map[string]Case{"": CaseInProgress, "in_progress": CaseInProgress,
-		"Manual_Check": CaseManualCheck, "transferred": CaseTransferred, "received": CaseReceived} {
+		"Manual_Check": CaseManualCheck, "transferred": CaseTransferred, "received": CaseReceived,
+		"bcs_pending": CaseBCSPending} {
 		if got, ok := ParseCase(in); !ok || got != want {
 			t.Errorf("ParseCase(%q) = %q, %v", in, got, ok)
 		}
@@ -152,9 +153,11 @@ func TestCaseConditions(t *testing.T) {
 func TestCaseTotal(t *testing.T) {
 	w := NewWindow(time.Date(2026, 10, 6, 14, 35, 0, 0, time.Local), 10)
 	r := newSummaryResponse(w, Summary{Received: 312, InProgress: 4, Success: 192, RemoteResolved: 136,
-		NotRemoteResolved: 56, KeptInNOC: 22, NotEligible: 40, CPENotFound: 7, APIUnreachable: 3})
+		NotRemoteResolved: 56, KeptInNOC: 22, NotEligible: 40, CPENotFound: 7, APIUnreachable: 3,
+		BCSOK: 120, BCSFailed: 6, BCSPending: 9})
 	for c, want := range map[Case]int{CaseReceived: 312, CaseInProgress: 4, CaseSuccess: 192,
-		CaseTransferred: 34, CaseKeptInNOC: 22, CaseNotEligible: 40, CaseManualCheck: 10} {
+		CaseTransferred: 34, CaseKeptInNOC: 22, CaseNotEligible: 40, CaseManualCheck: 10,
+		CaseBCSOK: 120, CaseBCSFailed: 6, CaseBCSPending: 9} {
 		if got := caseTotal(r, c); got != want {
 			t.Errorf("caseTotal(%s) = %d, want %d", c, got, want)
 		}
@@ -171,12 +174,35 @@ func TestNewRunItem(t *testing.T) {
 		*it.DurationSec != 95 || *it.CompletedAt != "2026-10-06T09:01:35" || it.IsBCSSuccess != nil {
 		t.Fatalf("run item = %+v", it)
 	}
+	if it.BCSJobID != "" || it.BeforeBCSChannel != nil || it.TargetBCSChannel != nil {
+		t.Errorf("run item without BCS = %+v", it)
+	}
+
+	bcs := newRunItem(ExportRun{RunID: "r2", State: "COMPLETED", CreatedAt: start,
+		IsRemoteResolved: sql.NullBool{Bool: true, Valid: true},
+		IsBCSSuccess:     sql.NullBool{Bool: true, Valid: true},
+		RefBCSProcessID:  sql.NullString{String: "job-1", Valid: true},
+		BeforeBCSChannel: sql.NullInt64{Int64: 11, Valid: true},
+		TargetBCSChannel: sql.NullInt64{Int64: 6, Valid: true}})
+	if bcs.BCSJobID != "job-1" || *bcs.BeforeBCSChannel != 11 || *bcs.TargetBCSChannel != 6 || !*bcs.IsBCSSuccess {
+		t.Errorf("run item with BCS = %+v", bcs)
+	}
+}
+
+func TestBCSPendingCondition(t *testing.T) {
+	// Pending means a queued job with no result: not "BCS never called"
+	// (empty job_id), and never overlapping BCS ok / failed.
+	for _, want := range []string{condRemote, "ref_bcs_process_id, '') <> ''", "is_bcs_success IS NULL"} {
+		if !strings.Contains(condBCSPending, want) {
+			t.Errorf("condBCSPending lacks %q", want)
+		}
+	}
 }
 
 func TestCaseWhere(t *testing.T) {
 	w := NewWindow(time.Date(2026, 10, 6, 14, 35, 0, 0, time.Local), 10)
 	w.NOCQueue = "NOC"
-	for _, c := range []Case{CaseInProgress, CaseReceived, CaseKeptInNOC, CaseTransferred, CaseManualCheck} {
+	for _, c := range []Case{CaseInProgress, CaseReceived, CaseKeptInNOC, CaseTransferred, CaseManualCheck, CaseBCSPending} {
 		for _, f := range []Filter{FilterAll, FilterRetrying, FilterStuck} {
 			cond, args, err := caseWhere(w, c, f)
 			if err != nil || strings.Count(cond, "?") != len(args) {

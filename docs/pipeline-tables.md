@@ -21,6 +21,8 @@ Table တွေကို ရေးတဲ့ component ၅ ခု (event ရဲ�
 | `retry_worker` | `retry_jobs` ကို poll လုပ်ပြီး ကျသွားတဲ့ step ကို ပြန် run တယ် |
 | `publish_timeout_sweeper` | Kafka ပို့ပြီး `PUBLISHED_TIMEOUT_MINUTES` (default 5) ကျော်ထိ consume မဖြစ်တဲ့ run ကို ပိတ်တယ် |
 | `rtutil_consumer` | Kafka ကနေ ဖတ်ပြီး BCS နဲ့ RT ticket ကို update လုပ်တယ် |
+| `bcs_webhook` | rt-external-api။ Peppermint ပို့တဲ့ BCS ရလဒ်ကို လက်ခံပြီး ရေးတယ် |
+| `bcs_result_sweeper` | rt-external-api။ Webhook မရောက်တဲ့ BCS job ကို Peppermint မှာ poll လုပ်ပြီး ရေးတယ် |
 
 State ပြောင်းတာ (`pipeline_runs`) နဲ့ event ထည့်တာ (`pipeline_run_events`) ကို transaction တစ်ခုတည်းမှာ လုပ်လို့ နှစ်ခု ဘယ်တော့မှ မကွဲပါဘူး။
 
@@ -51,7 +53,7 @@ Run စဖွင့်ချိန်မှာ RT webhook payload ကနေ က�
 | `cpe_id` | Process လုပ်မယ့် CPE။ စဝင်ချိန်မှာ ထည့်ပါတယ်။ မရှိရင် `NOT_ELIGIBLE`။ | CPE တစ်ခုကို ticket ထပ်ခါထပ်ခါ ဝင်လား စစ်ဖို့ (index ရှိ) |
 | `local_service_id` | Customer ရဲ့ service ID (ဥပမာ `2084145-001`)။ Eligibility gate လည်း ဖြစ်ပါတယ်။ | Customer အလိုက် ခွဲကြည့်ဖို့ |
 | `onu_serial`, `olt_hostname`, `ca1`, `uplink` | Node-RED ကနေ ရလာတဲ့ network topology။ `WORKFLOW_EVALUATED` ဖြစ်ချိန်မှာ ထည့်ပါတယ်။ | OLT/uplink တစ်ခုထဲမှာ ticket စုနေလား (outage ရှာဖို့) |
-| `ref_bcs_process_id`, `before_bcs_channel`, `target_bcs_channel` | နောက်လာမယ့် BCS stage အတွက် ချန်ထားတာ။ အခု ရေးတဲ့ code မရှိပါ။ | WiFi channel ပြောင်းတာကို ခြေရာခံဖို့ (နောင်တွင်) |
+| `ref_bcs_process_id`, `before_bcs_channel`, `target_bcs_channel` | `ref_bcs_process_id` = Peppermint BCS job_id (UUID)၊ rtutil က job ကို စခိုင်းပြီး `202` ရရင် ရေးတယ်။ Channel နှစ်ခုကို rt-external-api ရဲ့ BCS webhook က ရေးပါတယ် (status poll မှာ channel မပါ)။ | BCS pending ကို ခွဲခြားဖို့၊ WiFi channel ပြောင်းတာကို ခြေရာခံဖို့ |
 
 ### State / Processing
 
@@ -66,7 +68,7 @@ Run စဖွင့်ချိန်မှာ RT webhook payload ကနေ က�
 | Column | ရည်ရွယ်ချက် / ထည့်ပုံ | Reporting အသုံး |
 | --- | --- | --- |
 | `is_remote_resolved` | Workflow ရဲ့ target status က "Resolved" ဖြစ်ရင် 1။ `WORKFLOW_EVALUATED` ဖြစ်ချိန်မှာ ဆုံးဖြတ်ပါတယ်။ | **Remote resolved** / **Not remote resolved** card |
-| `is_bcs_success` | BCS ရလဒ် (1 = အောင်၊ 0 = ကျ၊ NULL = မလုပ်ရ/မရှိ)။ Remote resolved ticket အတွက်ပဲ `rtutil_consumer` က ရေးပါတယ်။ BCS ကျလည်း RT update ဆက်လုပ်ပါတယ်။ | **BCS OK / BCS failed** card |
+| `is_bcs_success` | BCS ရလဒ် (1 = အောင်၊ 0 = ကျ၊ NULL = ရလဒ် မရသေး / မခေါ်ရ)။ Remote resolved ticket အတွက်ပဲ ရှိပါတယ်။ BCS async ဖြစ်လို့ rtutil က job မစနိုင်မှသာ `0` ရေးပြီး၊ ကျန်တာကို rt-external-api ရဲ့ `bcs_webhook` / `bcs_result_sweeper` က run ပြီးသွားမှ (state မပြောင်းဘဲ) ရေးပါတယ်။ BCS ကျလည်း RT update ဆက်လုပ်ပါတယ်။ | **BCS OK / BCS failed / BCS pending** card |
 | `bcs_status_message` | BCS ကနေ ပြန်လာတဲ့ message/error။ | BCS failed ရဲ့ အကြောင်းရင်း |
 | `final_message` | RT ticket မှာ ရေးမယ့် workflow comment။ | Customer/NOC က ဘာ message မြင်ရလဲ စစ်ဖို့ |
 | `before_queue` | Pipeline စဝင်ချိန်က RT queue။ | **Kept in NOC** / **Transferred** ခွဲဖို့ |
@@ -129,7 +131,9 @@ Terminal state ရောက်ရင် `completed_at` ထည့်ပါတယ�
 | retry\_worker | `retry_attempts_exhausted`, `cpe_not_found_on_retry`, `normalize_failed_on_retry` | `error`, `attempt`, `max_attempts` |
 | publish\_timeout\_sweeper | `publish_consume_timeout` | `published_at`, `timeout_minutes` |
 | rtutil\_consumer | `kafka_consumed` | `topic`, `partition`, `offset` |
-| rtutil\_consumer | `consume_validation_failed`, `rt_ticket_fetch_failed`, `ticket_skipped`, `bcs_update_started/succeeded/failed`, `rt_update_started`, `rt_update_failed`, `rt_updated` | — |
+| rtutil\_consumer | `consume_validation_failed`, `rt_ticket_fetch_failed`, `ticket_skipped`, `bcs_update_started`, `bcs_job_queued`, `bcs_update_failed`, `rt_update_started`, `rt_update_failed`, `rt_updated` | — |
+| bcs\_webhook | `bcs_update_succeeded`, `bcs_update_failed` (state မပြောင်း) | Peppermint webhook payload တစ်ခုလုံး |
+| bcs\_result\_sweeper | `bcs_update_succeeded`, `bcs_update_failed` (state မပြောင်း) | `GET /channel-selections/{job_id}` response |
 
 ## ၃။ retry\_jobs
 
@@ -163,7 +167,7 @@ Node-RED သို့မဟုတ် Kafka ခဏ ကျနေတဲ့အခါ
 
 - **`refine_job` table မရှိပါဘူး။** Code နဲ့ doc အားလုံးမှာ ရှာကြည့်တော့ job table က `retry_jobs` တစ်ခုပဲ ရှိပါတယ်။
 - **Schema မတူတာ ရှိပါတယ်။** `Final/pipeline_runs.sql` မှာ `last_error` လို့ ရေးထားပေမဲ့ တကယ့် column က `last_state_reason` ဖြစ်ပါတယ်။ `local_service_id`၊ `ref_bcs_process_id` ကလည်း file ထဲမှာ မပါပါဘူး။ Table ကို noc\_automation startup မှာ GORM AutoMigrate က ဆောက်တာမို့ DB ကပဲ မှန်ပါတယ်။ AutoMigrate က column မဖျက်လို့ DB ဟောင်းမှာ `last_error` ကျန်နေနိုင်ပါတယ်။
-- **အမြဲ NULL ဖြစ်နေတဲ့ column တွေ** – `tags`၊ `ref_bcs_process_id`၊ `before_bcs_channel`၊ `target_bcs_channel`။ Report မှာ မသုံးပါနဲ့။
+- **အမြဲ NULL ဖြစ်နေတဲ့ column တွေ** – `tags`။ Report မှာ မသုံးပါနဲ့။ (`ref_bcs_process_id`၊ `before_bcs_channel`၊ `target_bcs_channel` ကို BCS async မှာ ရေးပါပြီ။)
 - **`ALREADY_PROCESSED`** state ကို ရေးတဲ့ code မရှိသေးပါဘူး။
 - Local DB မှာ `retry_jobs` row မရှိလို့ retry ပိုင်းကို code ကနေပဲ စစ်ခဲ့ရပါတယ်။ Data နဲ့ မစစ်ရသေးပါ။
 
