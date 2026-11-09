@@ -266,6 +266,9 @@
 <script>
 (() => {
   const INTERVAL_MS = 15000, STALE_MS = 45000, NEW_ROW_MS = 3000, STAGES = 8;
+  // Open the page with ?debug to log every API response to the browser
+  // console (DevTools → Console).
+  const DEBUG = new URLSearchParams(location.search).has('debug');
   const ICON_RETRY = '<span class="ico i-warn"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0114-5M20 12a8 8 0 01-14 5"/></svg></span>';
   const ICON_STUCK = '<span class="ico i-crit"><svg viewBox="0 0 24 24"><path d="M12 7v6M12 17h.01"/></svg></span>';
   const WEEKDAY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -541,9 +544,16 @@
         : `case=${encodeURIComponent(state.view)}`;
       if (caseOnly && !live) params += '&summary=0';
       params += `&src=${force ? 'click' : 'poll'}`;
-      const res = await fetch(`api/v1/pipeline-runs/today?${params}&limit=${state.limit}`, { cache: 'no-store' });
+      const url = `api/v1/pipeline-runs/today?${params}&limit=${state.limit}`;
+      const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      if (DEBUG) {
+        console.groupCollapsed(`[pipeline-report] ${new Date().toLocaleTimeString()} GET ${url}`);
+        console.log(data);
+        console.log(JSON.stringify(data, null, 2));
+        console.groupEnd();
+      }
       if (seq !== state.seq) return;
       if (data.summary) {
         state.summary = data.summary;

@@ -134,32 +134,32 @@ const rejectedStatus = `
 
 const summaryQuery = `
 SELECT
-  COUNT(*),
-  COALESCE(SUM(` + condNotEligible + `), 0),
-  COALESCE(SUM(pr.completed_at IS NULL), 0),
-  COALESCE(SUM(pr.completed_at IS NULL AND pr.current_state IN (` + retryStates + `)), 0),
+  COUNT(*) AS received,
+  COALESCE(SUM(` + condNotEligible + `), 0) AS not_eligible,
+  COALESCE(SUM(pr.completed_at IS NULL), 0) AS in_progress,
+  COALESCE(SUM(pr.completed_at IS NULL AND pr.current_state IN (` + retryStates + `)), 0) AS retrying,
   COALESCE(SUM(pr.completed_at IS NULL
            AND COALESCE(pr.current_state, '') NOT IN (` + retryStates + `)
-           AND COALESCE(pr.updated_at, pr.created_at) < ?), 0),
-  COALESCE(SUM(` + condSuccess + `), 0),
-  COALESCE(SUM(` + condRemote + `), 0),
-  COALESCE(SUM(` + condNotRemote + `), 0),
-  COALESCE(SUM(` + condKeptInNOC + `), 0),
-  COALESCE(SUM(` + condBCSOK + `), 0),
-  COALESCE(SUM(` + condBCSFailed + `), 0),
-  COALESCE(SUM(` + condBCSPending + `), 0),
-  COALESCE(SUM(pr.current_state IN (` + finishedStates + `)), 0),
-  COALESCE(SUM(pr.current_state = 'API_REJECTED' AND rej.http_status = 400), 0),
-  COALESCE(SUM(pr.current_state = 'CONSUME_VALIDATION_FAILED'), 0),
-  COALESCE(SUM(pr.current_state = 'API_REJECTED' AND rej.http_status = 409), 0),
-  COALESCE(SUM(pr.current_state = 'API_REJECTED' AND COALESCE(rej.http_status, 0) NOT IN (400, 409)), 0),
-  COALESCE(SUM(pr.current_state = 'API_UNREACHABLE'), 0),
-  COALESCE(SUM(pr.current_state IN ('FAILED_PERMANENT','NORMALIZE_FAILED')), 0),
-  COALESCE(SUM(pr.current_state = 'CPE_NOT_FOUND'), 0),
-  COALESCE(SUM(pr.current_state = 'RT_UPDATE_FAILED'), 0),
-  COALESCE(SUM(pr.current_state = 'SKIPPED'), 0),
+           AND COALESCE(pr.updated_at, pr.created_at) < ?), 0) AS stuck,
+  COALESCE(SUM(` + condSuccess + `), 0) AS success,
+  COALESCE(SUM(` + condRemote + `), 0) AS remote_resolved,
+  COALESCE(SUM(` + condNotRemote + `), 0) AS not_remote_resolved,
+  COALESCE(SUM(` + condKeptInNOC + `), 0) AS kept_in_noc,
+  COALESCE(SUM(` + condBCSOK + `), 0) AS bcs_ok,
+  COALESCE(SUM(` + condBCSFailed + `), 0) AS bcs_failed,
+  COALESCE(SUM(` + condBCSPending + `), 0) AS bcs_pending,
+  COALESCE(SUM(pr.current_state IN (` + finishedStates + `)), 0) AS finished,
+  COALESCE(SUM(pr.current_state = 'API_REJECTED' AND rej.http_status = 400), 0) AS validation_api_400,
+  COALESCE(SUM(pr.current_state = 'CONSUME_VALIDATION_FAILED'), 0) AS validation_rt_util,
+  COALESCE(SUM(pr.current_state = 'API_REJECTED' AND rej.http_status = 409), 0) AS api_error_409,
+  COALESCE(SUM(pr.current_state = 'API_REJECTED' AND COALESCE(rej.http_status, 0) NOT IN (400, 409)), 0) AS api_error_other,
+  COALESCE(SUM(pr.current_state = 'API_UNREACHABLE'), 0) AS api_unreachable,
+  COALESCE(SUM(pr.current_state IN ('FAILED_PERMANENT','NORMALIZE_FAILED')), 0) AS failed_permanent,
+  COALESCE(SUM(pr.current_state = 'CPE_NOT_FOUND'), 0) AS cpe_not_found,
+  COALESCE(SUM(pr.current_state = 'RT_UPDATE_FAILED'), 0) AS rt_update_failed,
+  COALESCE(SUM(pr.current_state = 'SKIPPED'), 0) AS skipped,
   COALESCE(SUM(pr.completed_at IS NOT NULL
-           AND COALESCE(pr.current_state, '') NOT IN (` + classifiedTerminal + `)), 0)
+           AND COALESCE(pr.current_state, '') NOT IN (` + classifiedTerminal + `)), 0) AS unclassified
 FROM pipeline_runs pr` + rejectedStatus + `
 WHERE pr.created_at >= ? AND pr.created_at < ?`
 
