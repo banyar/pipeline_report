@@ -123,7 +123,7 @@ func TestNewSummaryResponseSuccessSplit(t *testing.T) {
 func TestParseCase(t *testing.T) {
 	for in, want := range map[string]Case{"": CaseInProgress, "in_progress": CaseInProgress,
 		"Manual_Check": CaseManualCheck, "transferred": CaseTransferred, "received": CaseReceived,
-		"bcs_pending": CaseBCSPending} {
+		"bcs_pending": CaseBCSPending, "bcs_not_sent": CaseBCSNotSent} {
 		if got, ok := ParseCase(in); !ok || got != want {
 			t.Errorf("ParseCase(%q) = %q, %v", in, got, ok)
 		}
@@ -154,10 +154,10 @@ func TestCaseTotal(t *testing.T) {
 	w := NewWindow(time.Date(2026, 10, 6, 14, 35, 0, 0, time.Local), 10)
 	r := newSummaryResponse(w, Summary{Received: 312, InProgress: 4, Success: 192, RemoteResolved: 136,
 		NotRemoteResolved: 56, KeptInNOC: 22, NotEligible: 40, CPENotFound: 7, APIUnreachable: 3,
-		BCSOK: 120, BCSFailed: 6, BCSPending: 9})
+		BCSOK: 120, BCSFailed: 6, BCSPending: 9, BCSNotSent: 1})
 	for c, want := range map[Case]int{CaseReceived: 312, CaseInProgress: 4, CaseSuccess: 192,
 		CaseTransferred: 34, CaseKeptInNOC: 22, CaseNotEligible: 40, CaseManualCheck: 10,
-		CaseBCSOK: 120, CaseBCSFailed: 6, CaseBCSPending: 9} {
+		CaseBCSOK: 120, CaseBCSFailed: 6, CaseBCSPending: 9, CaseBCSNotSent: 1} {
 		if got := caseTotal(r, c); got != want {
 			t.Errorf("caseTotal(%s) = %d, want %d", c, got, want)
 		}
@@ -195,6 +195,16 @@ func TestBCSPendingCondition(t *testing.T) {
 	for _, want := range []string{condRemote, "ref_bcs_process_id, '') <> ''", "is_bcs_success IS NULL"} {
 		if !strings.Contains(condBCSPending, want) {
 			t.Errorf("condBCSPending lacks %q", want)
+		}
+	}
+}
+
+func TestBCSNotSentCondition(t *testing.T) {
+	// Not sent means no job and no result, so it never overlaps pending
+	// (a job), ok or failed (a result).
+	for _, want := range []string{condRemote, "ref_bcs_process_id, '') = ''", "is_bcs_success IS NULL"} {
+		if !strings.Contains(condBCSNotSent, want) {
+			t.Errorf("condBCSNotSent lacks %q", want)
 		}
 	}
 }

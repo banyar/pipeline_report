@@ -35,7 +35,11 @@ const (
 	condBCSFailed   = condRemote + ` AND pr.is_bcs_success = 0`
 	// BCS job queued at Peppermint (rtutil stored its job_id) with no result
 	// yet: the webhook or rt-external-api's status poll fills it in later.
-	condBCSPending  = condRemote + ` AND COALESCE(pr.ref_bcs_process_id, '') <> '' AND pr.is_bcs_success IS NULL`
+	condBCSPending = condRemote + ` AND COALESCE(pr.ref_bcs_process_id, '') <> '' AND pr.is_bcs_success IS NULL`
+	// Remote resolved but BCS was never sent: no job and no result (e.g. a
+	// message from before run_id existed). With BCS ok, failed and pending it
+	// accounts for every remote resolved run.
+	condBCSNotSent  = condRemote + ` AND COALESCE(pr.ref_bcs_process_id, '') = '' AND pr.is_bcs_success IS NULL`
 	condNotEligible = `pr.current_state IN ('NOT_ELIGIBLE','ALREADY_PROCESSED')`
 	// Validation failed + API error + failed, whatever the http_status.
 	condManualCheck = `pr.current_state IN ('API_REJECTED','API_UNREACHABLE','CONSUME_VALIDATION_FAILED',
@@ -105,6 +109,7 @@ type Summary struct {
 	BCSOK             int `json:"bcs_ok"`
 	BCSFailed         int `json:"bcs_failed"`
 	BCSPending        int `json:"bcs_pending"`
+	BCSNotSent        int `json:"bcs_not_sent"`
 	Finished          int `json:"finished"`
 	ValidationAPI400  int `json:"validation_api_400"`
 	ValidationRTUtil  int `json:"validation_rtutil"`
@@ -148,6 +153,7 @@ SELECT
   COALESCE(SUM(` + condBCSOK + `), 0) AS bcs_ok,
   COALESCE(SUM(` + condBCSFailed + `), 0) AS bcs_failed,
   COALESCE(SUM(` + condBCSPending + `), 0) AS bcs_pending,
+  COALESCE(SUM(` + condBCSNotSent + `), 0) AS bcs_not_sent,
   COALESCE(SUM(pr.current_state IN (` + finishedStates + `)), 0) AS finished,
   COALESCE(SUM(pr.current_state = 'API_REJECTED' AND rej.http_status = 400), 0) AS validation_api_400,
   COALESCE(SUM(pr.current_state = 'CONSUME_VALIDATION_FAILED'), 0) AS validation_rt_util,
@@ -167,7 +173,7 @@ func querySummary(ctx context.Context, q querier, w Window) (Summary, error) {
 	var r Summary
 	err := q.QueryRowContext(withSQLTitle(ctx, "summary"), summaryQuery, w.StuckBefore, w.NOCQueue, w.NOCQueue, w.Start, w.End, w.Start, w.End).Scan(
 		&r.Received, &r.NotEligible, &r.InProgress, &r.Retrying, &r.Stuck,
-		&r.Success, &r.RemoteResolved, &r.NotRemoteResolved, &r.KeptInNOC, &r.BCSOK, &r.BCSFailed, &r.BCSPending, &r.Finished,
+		&r.Success, &r.RemoteResolved, &r.NotRemoteResolved, &r.KeptInNOC, &r.BCSOK, &r.BCSFailed, &r.BCSPending, &r.BCSNotSent, &r.Finished,
 		&r.ValidationAPI400, &r.ValidationRTUtil,
 		&r.APIError409, &r.APIErrorOther, &r.APIUnreachable,
 		&r.FailedPermanent, &r.CPENotFound, &r.RTUpdateFailed,
@@ -336,6 +342,7 @@ const (
 	CaseBCSOK          Case = "bcs_ok"
 	CaseBCSFailed      Case = "bcs_failed"
 	CaseBCSPending     Case = "bcs_pending"
+	CaseBCSNotSent     Case = "bcs_not_sent"
 	CaseNotEligible    Case = "not_eligible"
 	CaseManualCheck    Case = "manual_check"
 )
@@ -354,6 +361,7 @@ var caseCond = map[Case]struct {
 	CaseBCSOK:          {sql: condBCSOK},
 	CaseBCSFailed:      {sql: condBCSFailed},
 	CaseBCSPending:     {sql: condBCSPending},
+	CaseBCSNotSent:     {sql: condBCSNotSent},
 	CaseNotEligible:    {sql: condNotEligible},
 	CaseManualCheck:    {sql: condManualCheck},
 }

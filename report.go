@@ -102,6 +102,8 @@ type SummaryResponse struct {
 		BCSFailed      int `json:"bcs_failed"`
 		// BCSPending: BCS job queued, result not in yet (webhook / poll).
 		BCSPending int `json:"bcs_pending"`
+		// BCSNotSent: remote resolved, but BCS was never sent.
+		BCSNotSent int `json:"bcs_not_sent"`
 	} `json:"success"`
 	NotEligible      int `json:"not_eligible"`
 	ValidationFailed struct {
@@ -147,6 +149,7 @@ func newSummaryResponse(w Window, s Summary) SummaryResponse {
 	r.Success.RemoteResolved, r.Success.KeptInNOC = s.RemoteResolved, s.KeptInNOC
 	r.Success.Transferred = s.NotRemoteResolved - s.KeptInNOC
 	r.Success.BCSOK, r.Success.BCSFailed, r.Success.BCSPending = s.BCSOK, s.BCSFailed, s.BCSPending
+	r.Success.BCSNotSent = s.BCSNotSent
 
 	r.ValidationFailed.API400, r.ValidationFailed.RTUtil = s.ValidationAPI400, s.ValidationRTUtil
 	r.ValidationFailed.Total = s.ValidationAPI400 + s.ValidationRTUtil
@@ -316,6 +319,8 @@ func caseTotal(r SummaryResponse, c Case) int {
 		return r.Success.BCSFailed
 	case CaseBCSPending:
 		return r.Success.BCSPending
+	case CaseBCSNotSent:
+		return r.Success.BCSNotSent
 	case CaseNotEligible:
 		return r.NotEligible
 	case CaseManualCheck:
