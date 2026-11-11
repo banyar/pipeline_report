@@ -156,7 +156,7 @@ func TestCaseTotal(t *testing.T) {
 		NotRemoteResolved: 56, KeptInNOC: 22, NotEligible: 40, CPENotFound: 7, APIUnreachable: 3,
 		BCSOK: 120, BCSFailed: 6, BCSPending: 9, BCSNotSent: 1})
 	for c, want := range map[Case]int{CaseReceived: 312, CaseInProgress: 4, CaseSuccess: 192,
-		CaseTransferred: 34, CaseKeptInNOC: 22, CaseNotEligible: 40, CaseManualCheck: 10,
+		CaseRemoteResolved: 136, CaseNoBCSNeeded: 56, CaseTransferred: 34, CaseKeptInNOC: 22, CaseNotEligible: 40, CaseManualCheck: 10,
 		CaseBCSOK: 120, CaseBCSFailed: 6, CaseBCSPending: 9, CaseBCSNotSent: 1} {
 		if got := caseTotal(r, c); got != want {
 			t.Errorf("caseTotal(%s) = %d, want %d", c, got, want)

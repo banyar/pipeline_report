@@ -337,6 +337,7 @@ const (
 	CaseReceived       Case = "received"
 	CaseSuccess        Case = "success"
 	CaseRemoteResolved Case = "remote_resolved"
+	CaseNoBCSNeeded    Case = "no_bcs_needed"
 	CaseTransferred    Case = "transferred"
 	CaseKeptInNOC      Case = "kept_in_noc"
 	CaseBCSOK          Case = "bcs_ok"
@@ -356,6 +357,7 @@ var caseCond = map[Case]struct {
 	CaseReceived:       {sql: `TRUE`},
 	CaseSuccess:        {sql: condSuccess},
 	CaseRemoteResolved: {sql: condRemote},
+	CaseNoBCSNeeded:    {sql: condNotRemote},
 	CaseTransferred:    {sql: condTransferred, inNOC: true},
 	CaseKeptInNOC:      {sql: condKeptInNOC, inNOC: true},
 	CaseBCSOK:          {sql: condBCSOK},

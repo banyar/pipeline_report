@@ -96,10 +96,13 @@ type SummaryResponse struct {
 		Total          int `json:"total"`
 		Finished       int `json:"finished"`
 		RemoteResolved int `json:"remote_resolved"`
-		Transferred    int `json:"transferred"`
-		KeptInNOC      int `json:"kept_in_noc"`
-		BCSOK          int `json:"bcs_ok"`
-		BCSFailed      int `json:"bcs_failed"`
+		// NoBCSNeeded: not remote resolved, so no channel change was needed
+		// (transferred + kept in NOC).
+		NoBCSNeeded int `json:"no_bcs_needed"`
+		Transferred int `json:"transferred"`
+		KeptInNOC   int `json:"kept_in_noc"`
+		BCSOK       int `json:"bcs_ok"`
+		BCSFailed   int `json:"bcs_failed"`
 		// BCSPending: BCS job queued, result not in yet (webhook / poll).
 		BCSPending int `json:"bcs_pending"`
 		// BCSNotSent: remote resolved, but BCS was never sent.
@@ -147,6 +150,7 @@ func newSummaryResponse(w Window, s Summary) SummaryResponse {
 	// Not remote resolved = moved to another queue, or left in the NOC queue
 	// (before_queue = target_queue = NOC) for NOC to follow up.
 	r.Success.RemoteResolved, r.Success.KeptInNOC = s.RemoteResolved, s.KeptInNOC
+	r.Success.NoBCSNeeded = s.NotRemoteResolved
 	r.Success.Transferred = s.NotRemoteResolved - s.KeptInNOC
 	r.Success.BCSOK, r.Success.BCSFailed, r.Success.BCSPending = s.BCSOK, s.BCSFailed, s.BCSPending
 	r.Success.BCSNotSent = s.BCSNotSent
@@ -309,6 +313,8 @@ func caseTotal(r SummaryResponse, c Case) int {
 		return r.Success.Total
 	case CaseRemoteResolved:
 		return r.Success.RemoteResolved
+	case CaseNoBCSNeeded:
+		return r.Success.NoBCSNeeded
 	case CaseTransferred:
 		return r.Success.Transferred
 	case CaseKeptInNOC:

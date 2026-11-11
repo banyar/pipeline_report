@@ -84,12 +84,19 @@
   .i-out { background: var(--neutral-light); } .i-out svg { stroke: #52514e; }
   .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 6px; vertical-align: -1px; }
 
-  .succ { display: grid; grid-template-columns: 1.5fr 1fr; gap: 28px; align-items: center; }
+  .succ { display: grid; grid-template-columns: 1fr 1.6fr; gap: 28px; align-items: start; }
+  .branch-head { margin-bottom: 10px; }
+  .branch-head .k { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink-1); }
+  .branch-head .k b { margin-left: 2px; }
+  .branch-head .crit { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; color: var(--ink-3); margin-top: 4px; overflow-wrap: anywhere; }
+  .branch-head[data-case] { border-radius: 6px; padding: 4px 6px; margin: -4px -6px 6px; }
+  .branch-head[data-case]:hover { background: var(--surface); }
+  .branch-head[data-case].picked { background: var(--wash-new); box-shadow: none; }
   .split .bar { display: flex; gap: 2px; height: 14px; margin-top: 4px; background: var(--grid); border-radius: 4px; }
   .split .bar div { min-width: 0; }
   .split .bar div:first-child { border-radius: 4px 0 0 4px; }
   .split .bar div:last-child { border-radius: 0 4px 4px 0; }
-  .split .lab { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; font-size: 13px; }
+  .split .lab { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 8px; font-size: 13px; }
   .split .crit { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; color: var(--ink-3); margin-top: 4px; line-height: 1.4; overflow-wrap: anywhere; }
   .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
   .stat .crit { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; color: var(--ink-3); margin-top: 4px; line-height: 1.4; overflow-wrap: anywhere; }
@@ -216,21 +223,24 @@
 
   <div class="row2">
     <div class="card panel">
-      <div class="panel-head"><div><h2 id="succ-title">Of — ticket-completed runs</h2><div class="hint">TICKET_COMPLETED: the RT REST2 update returned 200. For remote resolved runs, the BCS outcome decides whether the run is fully completed.</div></div></div>
+      <div class="panel-head"><div><h2 id="succ-title">Of — ticket-completed runs</h2><div class="hint">Every ticket-completed run (RT REST2 update returned 200) ends in one of five outcomes. Runs that need no channel change are done; for the rest, the BCS result decides.</div></div></div>
       <div class="succ">
         <div class="split">
-          <div class="bar"><div id="bar-remote" style="flex:0;background:var(--series-1)"></div><div id="bar-transfer" style="flex:0;background:var(--series-2)"></div><div id="bar-kept" style="flex:0;background:var(--neutral)"></div></div>
+          <div class="branch-head" data-case="no_bcs_needed" role="button" tabindex="0"><div class="k"><span class="ico i-out"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></span>No channel change needed <b id="l-nobcs">—</b></div><div class="crit">TICKET_COMPLETED · COMPLETED + is_remote_resolved = 0 · nothing more to check</div></div>
+          <div class="bar"><div id="bar-transfer" style="flex:0;background:var(--series-2)"></div><div id="bar-kept" style="flex:0;background:var(--neutral)"></div></div>
           <div class="lab">
-            <div data-case="remote_resolved" role="button" tabindex="0"><span class="sw" style="background:var(--series-1)"></span>Remote resolved <b id="l-remote">—</b><div class="crit">COMPLETED + is_remote_resolved = 1</div></div>
             <div data-case="transferred" role="button" tabindex="0"><span class="sw" style="background:var(--series-2)"></span>Transferred <b id="l-transfer">—</b><div class="crit">COMPLETED + is_remote_resolved = 0 − Kept in NOC</div></div>
             <div data-case="kept_in_noc" role="button" tabindex="0"><span class="sw" style="background:var(--neutral)"></span>Kept in NOC <b id="l-kept">—</b><div class="crit">COMPLETED + before_queue = target_queue = NOC</div></div>
           </div>
         </div>
+        <div>
+        <div class="branch-head"><div class="k"><span class="ico i-good"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0114-5M20 12a8 8 0 01-14 5"/></svg></span>Channel change (BCS)</div><div class="crit">the BCS result decides the outcome</div></div>
         <div class="stat-grid">
           <div class="stat" data-case="bcs_ok" role="button" tabindex="0"><div class="k"><span class="ico i-good"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg></span>Fully completed</div><div class="v"><span id="s-bcsok">—</span><small id="s-bcsok-of"></small></div><div class="crit">FULLY_COMPLETED · ticket completed + BCS succeeded</div></div>
           <div class="stat" data-case="bcs_failed" role="button" tabindex="0"><div class="k"><span class="ico i-serious"><svg viewBox="0 0 24 24"><path d="M12 7v6M12 17h.01"/></svg></span>BCS failed</div><div class="v"><span id="s-bcsfail">—</span><small>channel not changed · needs follow-up</small></div><div class="crit">BCS_FAILED · ticket completed, BCS failed</div></div>
           <div class="stat" data-case="bcs_pending" role="button" tabindex="0"><div class="k"><span class="ico i-warn"><svg viewBox="0 0 24 24"><path d="M12 7v5l3 3"/></svg></span>BCS pending</div><div class="v"><span id="s-bcspending">—</span><small>job queued, no result yet</small></div><div class="crit">BCS_PENDING · ticket completed, BCS result not in yet</div></div>
           <div class="stat" data-case="bcs_not_sent" role="button" tabindex="0"><div class="k"><span class="ico i-out"><svg viewBox="0 0 24 24"><path d="M6 6l12 12"/></svg></span>BCS not sent</div><div class="v"><span id="s-bcsnotsent">—</span><small>no BCS job was created</small></div><div class="crit">BCS_NOT_SENT · ticket completed, BCS never sent</div></div>
+        </div>
         </div>
       </div>
     </div>
@@ -284,6 +294,7 @@
     received: ['Received today', 'Every run opened today, any state · newest first'],
     success: ['Ticket completed', 'TICKET_COMPLETED: RT ticket updated (COMPLETED); BCS shown separately · newest first'],
     remote_resolved: ['Remote resolved', 'COMPLETED + is_remote_resolved = 1 · newest first'],
+    no_bcs_needed: ['No channel change needed', 'TICKET_COMPLETED: not remote resolved, so no BCS job · transferred or kept in NOC · newest first'],
     transferred: ['Transferred', 'COMPLETED, moved to another queue · newest first'],
     kept_in_noc: ['Kept in NOC', 'COMPLETED, left in the NOC queue for NOC to follow up · newest first'],
     bcs_ok: ['Fully completed', 'FULLY_COMPLETED: ticket completed and BCS succeeded · newest first'],
@@ -337,10 +348,9 @@
     set('m-manual', `<b>${pct(s.manual_check, s.received)}</b> of received · needs a person`);
 
     set('succ-title', `Of ${s.success.total} ticket-completed runs`);
-    $('bar-remote').style.flex = s.success.remote_resolved;
+    set('l-nobcs', String(s.success.no_bcs_needed));
     $('bar-transfer').style.flex = s.success.transferred;
     $('bar-kept').style.flex = s.success.kept_in_noc;
-    set('l-remote', String(s.success.remote_resolved));
     set('l-transfer', String(s.success.transferred));
     set('l-kept', String(s.success.kept_in_noc));
     set('s-bcsok', String(s.success.bcs_ok));

@@ -60,7 +60,7 @@ Pipeline service များ (rtdatacore DSN `loc=Local`) သည် DATETIME �
 |---|---|
 | `GET /` | Report UI (15 စက္ကန့်တစ်ကြိမ် refresh) |
 | `GET /api/v1/pipeline-runs/today?filter=&limit=` | Summary + live list ကို အချိန်တစ်ခုတည်းဖြင့် — UI က ဤ endpoint ကို poll လုပ်သည် |
-| `GET /api/v1/pipeline-runs/today?case=&limit=` | Summary + card တစ်ခု၏ run list (`runs`) — state, queue, BCS, reason ပါသည်။ case: `received`, `success`, `remote_resolved`, `transferred`, `kept_in_noc`, `bcs_ok`, `bcs_failed`, `bcs_pending`, `not_eligible`, `manual_check` (မပါ/`in_progress` ဆိုလျှင် live list) |
+| `GET /api/v1/pipeline-runs/today?case=&limit=` | Summary + card တစ်ခု၏ run list (`runs`) — state, queue, BCS, reason ပါသည်။ case: `received`, `success`, `remote_resolved`, `no_bcs_needed`, `transferred`, `kept_in_noc`, `bcs_ok`, `bcs_failed`, `bcs_pending`, `bcs_not_sent`, `not_eligible`, `manual_check` (မပါ/`in_progress` ဆိုလျှင် live list) |
 | `GET /api/v1/pipeline-runs/today?case=&summary=0&limit=` | Card နှိပ်ချိန် — summary မပါဘဲ card ၏ run list နှင့် `COUNT(*)` သာ (`runs.total`)။ Card များကို နောက် poll တွင် update လုပ်သည် |
 | `GET /api/v1/pipeline-runs/today/summary` | Spec ၏ Q1 (§10 JSON) |
 | `GET /api/v1/pipeline-runs/today/in-progress?filter=all\|retrying\|stuck&limit=` | Spec ၏ Q2 (limit default 50, max 200) |
