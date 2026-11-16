@@ -31,6 +31,8 @@ func TestBucket(t *testing.T) {
 	}{
 		{"PUBLISHED", false, 0, "in_progress"},
 		{"", false, 0, "in_progress"},
+		{"TICKET_COMPLETED", true, 0, "success"},
+		{"FULLY_COMPLETED", true, 0, "success"},
 		{"COMPLETED", true, 0, "success"},
 		{"NOT_ELIGIBLE", true, 0, "not_eligible"},
 		{"API_REJECTED", true, 400, "validation_failed"},

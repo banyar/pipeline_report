@@ -12,9 +12,15 @@ import (
 // are "retrying", never "stuck".
 const retryStates = `'CPE_FETCH_RETRY_SCHEDULED','KAFKA_PUBLISH_RETRY_SCHEDULED'`
 
+// ticketCompletedStates are the runs whose RT update succeeded: rtutil
+// writes TICKET_COMPLETED, and a succeeded BCS result moves the run on to
+// FULLY_COMPLETED (rtdatacore >= v1.1.21). COMPLETED is the state rows had
+// before that and is kept so older days still count.
+const ticketCompletedStates = `'TICKET_COMPLETED','FULLY_COMPLETED','COMPLETED'`
+
 // finishedStates are the terminal states reached after the API accepted the
 // run - the denominator of the success rate. NORMALIZE_FAILED is legacy data.
-const finishedStates = `'COMPLETED','SKIPPED','CONSUME_VALIDATION_FAILED','FAILED_PERMANENT','CPE_NOT_FOUND','RT_UPDATE_FAILED','NORMALIZE_FAILED'`
+const finishedStates = ticketCompletedStates + `,'SKIPPED','CONSUME_VALIDATION_FAILED','FAILED_PERMANENT','CPE_NOT_FOUND','RT_UPDATE_FAILED','NORMALIZE_FAILED'`
 
 // classifiedTerminal is every terminal state some bucket counts. A finished
 // run outside it is "unclassified" (Q4): a new state was added to rtdatacore
@@ -25,7 +31,7 @@ const classifiedTerminal = finishedStates + `,'NOT_ELIGIBLE','ALREADY_PROCESSED'
 // both use these, so a card's number and the list it opens cannot disagree.
 // The kept-in-NOC ones take the NOC queue name twice.
 const (
-	condSuccess     = `pr.current_state = 'COMPLETED'`
+	condSuccess     = `pr.current_state IN (` + ticketCompletedStates + `)`
 	condRemote      = condSuccess + ` AND pr.is_remote_resolved = 1`
 	condNotRemote   = condSuccess + ` AND COALESCE(pr.is_remote_resolved, 0) = 0`
 	condInNOC       = `TRIM(pr.before_queue) = ? AND TRIM(pr.target_queue) = ?`

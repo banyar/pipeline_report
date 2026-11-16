@@ -45,7 +45,7 @@ func bucket(state string, completed bool, httpStatus int64) string {
 		return "in_progress"
 	}
 	switch state {
-	case "COMPLETED":
+	case "TICKET_COMPLETED", "FULLY_COMPLETED", "COMPLETED":
 		return "success"
 	case "NOT_ELIGIBLE", "ALREADY_PROCESSED":
 		return "not_eligible"

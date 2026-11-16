@@ -99,24 +99,25 @@ Card ဂဏန်းအားလုံးကို `FROM pipeline_runs pr <rej j
 | In progress | `completed_at IS NULL` | — |
 | ↳ retrying | `completed_at IS NULL AND current_state IN ('CPE_FETCH_RETRY_SCHEDULED','KAFKA_PUBLISH_RETRY_SCHEDULED')` | — |
 | ↳ stuck | `completed_at IS NULL AND COALESCE(current_state,'') NOT IN (<retry states>) AND COALESCE(updated_at, created_at) < :now − REPORT_STUCK_MINUTES` | — |
-| Success | `current_state = 'COMPLETED'` | finished |
-| Remote resolved | `COMPLETED AND is_remote_resolved = 1` | Success |
+| Ticket completed | `current_state IN ('TICKET_COMPLETED','FULLY_COMPLETED','COMPLETED')` (= **TC** အောက်တွင်) | finished |
+| Remote resolved | `TC AND is_remote_resolved = 1` | Success |
 | Not eligible | `current_state IN ('NOT_ELIGIBLE','ALREADY_PROCESSED')` | Received |
 | Manual check | အောက်ပါ sub-bucket ၈ ခု ပေါင်းလဒ် | Received |
 
-- **finished** = `current_state IN ('COMPLETED','SKIPPED','CONSUME_VALIDATION_FAILED','FAILED_PERMANENT','CPE_NOT_FOUND','RT_UPDATE_FAILED','NORMALIZE_FAILED')` — API လက်ခံပြီးမှ ပြီးသော run များ။ NOT_ELIGIBLE / API_REJECTED / API_UNREACHABLE မပါ။
+- **TC** (ticket completed) = RT update အောင်မြင်သော run — rtutil က `TICKET_COMPLETED` ရေးပြီး BCS succeeded ရလဒ် ရောက်လျှင် `FULLY_COMPLETED` သို့ ပြောင်းသည် (rtdatacore ≥ v1.1.21)။ `COMPLETED` သည် ယင်းမတိုင်မီ row ဟောင်းများအတွက်။
+- **finished** = `current_state IN ('TICKET_COMPLETED','FULLY_COMPLETED','COMPLETED','SKIPPED','CONSUME_VALIDATION_FAILED','FAILED_PERMANENT','CPE_NOT_FOUND','RT_UPDATE_FAILED','NORMALIZE_FAILED')` — API လက်ခံပြီးမှ ပြီးသော run များ။ NOT_ELIGIBLE / API_REJECTED / API_UNREACHABLE မပါ။
 - Retry state ရှိ run သည် တမင် စောင့်နေခြင်းဖြစ်၍ stuck ထဲ မပါ။ State မရှိသေးသော run (`''`) ကား ပါသည်။
 
 ### Success panel ("Of N successful runs")
 
 | နေရာ | Condition |
 |---|---|
-| Remote resolved | `COMPLETED AND is_remote_resolved = 1` |
-| Kept in NOC | `COMPLETED AND COALESCE(is_remote_resolved,0) = 0 AND TRIM(before_queue) = :noc AND TRIM(target_queue) = :noc` |
-| Transferred | summary တွင် (not remote resolved) − (kept in NOC)။ List တွင် `COMPLETED AND COALESCE(is_remote_resolved,0) = 0 AND NOT COALESCE(TRIM(before_queue) = :noc AND TRIM(target_queue) = :noc, FALSE)` |
-| BCS updated | `COMPLETED AND is_remote_resolved = 1 AND is_bcs_success = 1` |
-| Resolved, BCS failed | `COMPLETED AND is_remote_resolved = 1 AND is_bcs_success = 0` |
-| BCS pending | `COMPLETED AND is_remote_resolved = 1 AND COALESCE(ref_bcs_process_id,'') <> '' AND is_bcs_success IS NULL` |
+| Remote resolved | `TC AND is_remote_resolved = 1` |
+| Kept in NOC | `TC AND COALESCE(is_remote_resolved,0) = 0 AND TRIM(before_queue) = :noc AND TRIM(target_queue) = :noc` |
+| Transferred | summary တွင် (not remote resolved) − (kept in NOC)။ List တွင် `TC AND COALESCE(is_remote_resolved,0) = 0 AND NOT COALESCE(TRIM(before_queue) = :noc AND TRIM(target_queue) = :noc, FALSE)` |
+| BCS updated | `TC AND is_remote_resolved = 1 AND is_bcs_success = 1` |
+| Resolved, BCS failed | `TC AND is_remote_resolved = 1 AND is_bcs_success = 0` |
+| BCS pending | `TC AND is_remote_resolved = 1 AND COALESCE(ref_bcs_process_id,'') <> '' AND is_bcs_success IS NULL` |
 
 - `:noc` = `REPORT_NOC_QUEUE`။
 - Transferred list ၏ `COALESCE(..., FALSE)` ကြောင့် queue တစ်ခုခု NULL ဖြစ်သော run သည် summary ၏ နုတ်တွက်နည်းကဲ့သို့ပင် transferred ထဲ ကျသည်။
