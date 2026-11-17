@@ -179,3 +179,19 @@ systemctl --user stop rt5-dump              # ရပ်ချင်ရင်
 
 
 tail -f .run/pipeline_report.log
+
+tail -f ~/FrontiirProjects/RT/work_flow_end_to_end/rt_web_ui/.run/pipeline_report.log | grep --line-buffered "SQL QUERY"
+
+
+
+
+
+udo systemctl stop mysql                     # host MySQL က 3306 ကို ယူထားရင်
+~/db_dumps/resume_rt5_import.sh --dry-run     # ဘယ် table ကနေ ဆက်မလဲ အရင်ကြည့်ပါ
+
+~/db_dumps/resume_rt5_import.sh               # တကယ် resume လုပ်ပါ (၁ နာရီကျော် ကြာနိုင်လို့ terminal ကို ဖွင့်ထားပါ)
+
+
+sudo systemctl stop mysql                    # host MySQL က 3306 ကို ယူနေရင်
+~/db_dumps/resume_rt5_import.sh --dry-run    # "ObjectCustomFieldValues" လို့ ပြရပါမယ်
+~/db_dumps/resume_rt5_import.sh              # တကယ် resume (နာရီပိုင်း ကြာပါမယ်)
