@@ -47,6 +47,7 @@ make docker-down
 | `REPORT_STUCK_MINUTES` | `10` | Retry မဟုတ်ဘဲ state မပြောင်းသော မိနစ် — Stuck |
 | `REPORT_DB_MAX_OPEN` | `5` | Report ၏ connection pool အရွယ် |
 | `REPORT_LOG_SQL` | `false` | `true` ဖြစ်လျှင် query တိုင်းကို argument များ ဖြည့်ပြီးသား final SQL အဖြစ် log ထုတ်သည် |
+| `REPORT_RT_URL` | `http://localhost:8084` | Ticket id ကို နှိပ်လျှင် tab အသစ်ဖြင့် ဖွင့်မည့် RT web base URL (`<URL>/Ticket/Display.html?id=<id>`) |
 
 Environment variable သည် `.env` ထက် ဦးစားပေးသည်။
 
@@ -59,9 +60,9 @@ Pipeline service များ (rtdatacore DSN `loc=Local`) သည် DATETIME �
 | Path | |
 |---|---|
 | `GET /` | Report UI (15 စက္ကန့်တစ်ကြိမ် refresh) |
-| `GET /api/v1/pipeline-runs/today?filter=&limit=` | Summary + live list ကို အချိန်တစ်ခုတည်းဖြင့် — UI က ဤ endpoint ကို poll လုပ်သည် |
+| `GET /api/v1/pipeline-runs/today?filter=&limit=` | Summary + live list ကို အချိန်တစ်ခုတည်းဖြင့် — UI က page ဖွင့်ချိန်နှင့် **Refresh** button နှိပ်ချိန်တွင်သာ ခေါ်သည် (auto-refresh မရှိ) |
 | `GET /api/v1/pipeline-runs/today?case=&limit=` | Summary + card တစ်ခု၏ run list (`runs`) — state, queue, BCS, reason ပါသည်။ case: `received`, `success`, `remote_resolved`, `no_bcs_needed`, `transferred`, `kept_in_noc`, `bcs_ok`, `bcs_failed`, `bcs_pending`, `bcs_not_sent`, `not_eligible`, `manual_check` (မပါ/`in_progress` ဆိုလျှင် live list) |
-| `GET /api/v1/pipeline-runs/today?case=&summary=0&limit=` | Card နှိပ်ချိန် — summary မပါဘဲ card ၏ run list နှင့် `COUNT(*)` သာ (`runs.total`)။ Card များကို နောက် poll တွင် update လုပ်သည် |
+| `GET /api/v1/pipeline-runs/today?case=&summary=0&limit=` | Summary မပါဘဲ card ၏ run list နှင့် `COUNT(*)` သာ (`runs.total`)။ UI က မသုံးတော့ပါ (card နှိပ်လျှင် card နှင့် list တူစေရန် summary ပါ ယူသည်) |
 | `GET /api/v1/pipeline-runs/today/summary` | Spec ၏ Q1 (§10 JSON) |
 | `GET /api/v1/pipeline-runs/today/in-progress?filter=all\|retrying\|stuck&limit=` | Spec ၏ Q2 (limit default 50, max 200) |
 | `GET /api/v1/pipeline-runs/today/export.csv?case=&filter=` | ယနေ့ run + bucket (Export CSV ခလုတ်)။ case မပါလျှင် run အားလုံး၊ case ပါလျှင် ထို card ၏ run များသာ (`in_progress` တွင် filter ကိုလည်း လိုက်သည်) |

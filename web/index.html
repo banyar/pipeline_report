@@ -108,13 +108,12 @@
 
   .live { overflow: hidden; }
   .live-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--grid); flex-wrap: wrap; }
-  .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 4px rgba(12,163,12,0.18); animation: pulse 1.6s ease-in-out infinite; }
-  @keyframes pulse { 50% { box-shadow: 0 0 0 7px rgba(12,163,12,0.04); } }
-  .live-badge { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--good-ink); }
-  .live-badge.paused { color: var(--ink-3); }
-  .live-badge.paused .pulse { background: var(--neutral); box-shadow: none; animation: none; }
   .refresh { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
   .refresh.stale { color: var(--critical); }
+  button.control:disabled { opacity: 0.6; cursor: progress; }
+  #reload.busy svg { animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { #reload.busy svg { animation: none; } }
   .table-scroll { overflow-x: auto; }
   table.runs { width: 100%; border-collapse: collapse; }
   .runs th { text-align: left; font-size: 12px; font-weight: 600; color: var(--ink-3); padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--grid); white-space: nowrap; }
@@ -126,6 +125,8 @@
   .runs tr.new td { background: var(--wash-new); }
   .runs .empty td { text-align: center; color: var(--ink-3); padding: 28px 20px; }
   .tk { font-weight: 600; }
+  .tk a { color: inherit; text-decoration: none; border-bottom: 1px dashed var(--ink-3); }
+  .tk a:hover { color: var(--series-1); border-bottom-color: var(--series-1); border-bottom-style: solid; }
   .tk small { display: block; color: var(--ink-3); font-weight: 400; font-size: 12px; }
   .steps { display: inline-flex; align-items: center; vertical-align: middle; margin-right: 10px; }
   .steps i { width: 8px; height: 8px; border-radius: 50%; background: var(--grid); display: block; }
@@ -250,13 +251,9 @@
     <div class="live-head">
       <div><h2 style="font-size:15px;font-weight:650;margin:0" id="list-title">In progress now</h2><div class="hint" id="list-hint">Today's runs not yet in a terminal state · oldest first</div></div>
       <button type="button" class="back" id="back" hidden>← Back to in progress</button>
-      <span class="live-badge" id="badge"><span class="pulse"></span><span id="badge-text">LIVE</span></span>
       <div class="spacer"></div>
-      <span class="refresh" id="refresh">
-        <svg width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--grid)" stroke-width="2.5"/><circle id="ring" cx="10" cy="10" r="8" fill="none" stroke="var(--series-1)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="50.3" stroke-dashoffset="50.3" transform="rotate(-90 10 10)"/></svg>
-        <span id="refresh-text">Loading…</span>
-      </span>
-      <button type="button" class="control" id="pause"><svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg><span>Pause</span></button>
+      <span class="refresh" id="refresh" aria-live="polite"><span id="refresh-text">Loading…</span></span>
+      <button type="button" class="control" id="reload" title="Load the latest data"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg><span>Refresh</span></button>
     </div>
     <div class="table-scroll">
       <table class="runs">
@@ -277,7 +274,9 @@
 
 <script>
 (() => {
-  const INTERVAL_MS = 15000, STALE_MS = 45000, NEW_ROW_MS = 3000, STAGES = 8;
+  // No auto-refresh: data loads on page open and when Refresh (or a card /
+  // Back / Load more) is clicked.
+  const NEW_ROW_MS = 3000, STAGES = 8;
   // Open the page with ?debug to log every API response to the browser
   // console (DevTools → Console).
   const DEBUG = new URLSearchParams(location.search).has('debug');
@@ -313,8 +312,8 @@
     in_progress: 'in progress', not_eligible: 'not eligible', success: 'ticket completed', skipped: 'skipped', unclassified: 'unclassified' };
 
   const state = {
-    view: 'in_progress', filter: 'all', limit: 50, paused: false, timer: null, tick: null,
-    nextAt: 0, lastOk: 0, lastUpdated: '', summary: null, seen: null, inflight: false, seq: 0, error: false,
+    view: 'in_progress', filter: 'all', limit: 50,
+    lastOk: 0, lastUpdated: '', summary: null, seen: null, inflight: false, seq: 0, error: false,
   };
   const $ = id => document.getElementById(id);
 
@@ -377,7 +376,13 @@
     return `<span class="steps">${html}</span>`;
   }
 
-  const ticketCell = it => `<td class="tk">${it.ticket_id !== null ? `#${esc(it.ticket_id)}` : '—'}<small>${esc(it.ticket_no) || '&nbsp;'}</small></td>
+  // RT base URL from /api/v1/config (REPORT_RT_URL); ticket ids link to RT's
+  // ticket page in a new tab.
+  let RT_URL = 'http://localhost:8084';
+  fetch('api/v1/config', { cache: 'no-store' }).then(r => r.ok ? r.json() : null)
+    .then(c => { if (c && c.rt_url) RT_URL = c.rt_url; }).catch(() => {});
+  const ticketLink = id => `<a href="${esc(RT_URL)}/Ticket/Display.html?id=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer" title="Open ticket #${esc(id)} in RT">#${esc(id)}</a>`;
+  const ticketCell = it => `<td class="tk">${it.ticket_id !== null ? ticketLink(it.ticket_id) : '—'}<small>${esc(it.ticket_no) || '&nbsp;'}</small></td>
       <td class="mono" style="font-size:12px">${esc(it.cpe_id) || '—'}</td>
       <td>${esc(it.township) || '—'}</td>`;
 
@@ -500,64 +505,42 @@
     try { history.replaceState(null, '', live ? location.pathname + location.search : '#case=' + view); } catch {}
   }
 
-  function setBadge() {
-    $('badge').classList.toggle('paused', state.paused);
-    $('badge-text').textContent = state.paused ? 'PAUSED' : 'LIVE';
-    $('pause').querySelector('span').textContent = state.paused ? 'Resume' : 'Pause';
-    $('pause').querySelector('svg').innerHTML = state.paused ? '<path d="M7 5l12 7-12 7z"/>' : '<path d="M9 5v14M15 5v14"/>';
-  }
-
-  function renderCountdown() {
-    const ring = $('ring'), text = $('refresh-text'), box = $('refresh');
-    const stale = state.lastOk ? Date.now() - state.lastOk > STALE_MS : state.error;
-    box.classList.toggle('stale', !!(stale && !state.paused));
-    const banner = $('banner');
-    if (stale && !state.paused) {
+  // renderStatus shows when the data was loaded and whether the last
+  // Refresh failed; nothing reloads on its own.
+  function renderStatus() {
+    const text = $('refresh-text'), box = $('refresh'), banner = $('banner'), btn = $('reload');
+    btn.disabled = state.inflight;
+    btn.classList.toggle('busy', state.inflight);
+    box.classList.toggle('stale', state.error);
+    if (state.error) {
       banner.textContent = state.lastOk
-        ? `Data is stale — the last successful refresh was at ${state.lastUpdated}. Retrying every ${INTERVAL_MS / 1000}s.`
-        : `Cannot load the report from the server. Retrying every ${INTERVAL_MS / 1000}s.`;
+        ? `Refresh failed — showing data from ${state.lastUpdated}. Press Refresh to try again.`
+        : 'Cannot load the report from the server. Press Refresh to try again.';
       banner.classList.add('show');
     } else {
       banner.classList.remove('show');
     }
-    if (state.paused || document.visibilityState === 'hidden') {
-      ring.setAttribute('stroke-dashoffset', '50.3');
-      text.textContent = state.lastUpdated ? `Paused · updated ${state.lastUpdated}` : 'Paused';
-      return;
-    }
-    if (state.inflight || !state.nextAt) {
+    if (state.inflight) {
       text.textContent = state.lastUpdated ? `Refreshing… · updated ${state.lastUpdated}` : 'Loading…';
       return;
     }
-    const left = Math.max(0, state.nextAt - Date.now());
-    ring.setAttribute('stroke-dashoffset', String(50.3 * (left / INTERVAL_MS)));
-    const secs = Math.ceil(left / 1000);
     text.textContent = state.error
-      ? `Last updated ${state.lastUpdated || '—'} · retrying in ${secs}s`
-      : `Refreshing in ${secs}s · updated ${state.lastUpdated}`;
+      ? `Last updated ${state.lastUpdated || '—'}`
+      : `Updated ${state.lastUpdated}`;
   }
 
-  // force loads once even while paused, so switching lists never leaves the
-  // table on "Loading…"; polling still resumes only with Resume.
-  // caseOnly (a card click) skips the summary: only the picked list loads,
-  // and the cards update on the next poll.
-  async function refresh(force, caseOnly) {
-    clearTimeout(state.timer);
-    state.timer = null;
-    if (!force && (state.paused || document.visibilityState === 'hidden')) { renderCountdown(); return; }
-    // A newer refresh (filter change, resume, tab shown) supersedes this one:
-    // only the latest request renders and schedules the next poll, so there
-    // is never more than one timer running.
+  // refresh loads the cards and the current list at one instant. A newer
+  // refresh (another click) supersedes this one: only the latest renders.
+  async function refresh() {
     const seq = ++state.seq;
     state.inflight = true;
-    renderCountdown();
+    renderStatus();
     try {
       const live = state.view === 'in_progress';
       let params = live
         ? `filter=${encodeURIComponent(state.filter)}`
         : `case=${encodeURIComponent(state.view)}`;
-      if (caseOnly && !live) params += '&summary=0';
-      params += `&src=${force ? 'click' : 'poll'}`;
+      params += '&src=click';
       const url = `api/v1/pipeline-runs/today?${params}&limit=${state.limit}`;
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -585,12 +568,7 @@
     } finally {
       if (seq !== state.seq) return;
       state.inflight = false;
-      // Next poll starts only after this one returned, so requests never pile up.
-      if (!state.paused && document.visibilityState !== 'hidden') {
-        state.nextAt = Date.now() + INTERVAL_MS;
-        state.timer = setTimeout(refresh, INTERVAL_MS);
-      }
-      renderCountdown();
+      renderStatus();
     }
   }
 
@@ -598,7 +576,7 @@
   const pick = el => {
     showCase(el.dataset.case === state.view ? 'in_progress' : el.dataset.case);
     $('rows').closest('.live').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    refresh(true, true);
+    refresh();
   };
   document.querySelectorAll('[data-case]').forEach(el => {
     el.addEventListener('click', () => pick(el));
@@ -606,22 +584,11 @@
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(el); }
     });
   });
-  $('back').addEventListener('click', () => { showCase('in_progress'); refresh(true); });
-  $('more').addEventListener('click', () => { state.limit = 200; refresh(true, true); });
-  $('pause').addEventListener('click', () => {
-    state.paused = !state.paused;
-    setBadge();
-    if (state.paused) { clearTimeout(state.timer); state.timer = null; renderCountdown(); }
-    else refresh();
-  });
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') { clearTimeout(state.timer); state.timer = null; renderCountdown(); }
-    else if (!state.paused) refresh();
-  });
+  $('back').addEventListener('click', () => { showCase('in_progress'); refresh(); });
+  $('more').addEventListener('click', () => { state.limit = 200; refresh(); });
+  $('reload').addEventListener('click', () => refresh());
 
-  state.tick = setInterval(renderCountdown, 250);
   showCase((location.hash.match(/case=(\w+)/) || [])[1]);
-  setBadge();
   refresh();
 })();
 </script>

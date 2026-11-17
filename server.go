@@ -20,6 +20,7 @@ type Server struct {
 	loc          *time.Location
 	stuckMinutes int
 	nocQueue     string
+	rtURL        string
 	now          func() time.Time
 }
 
@@ -31,8 +32,15 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/pipeline-runs/today/summary", s.handleSummary)
 	mux.HandleFunc("GET /api/v1/pipeline-runs/today/in-progress", s.handleInProgress)
 	mux.HandleFunc("GET /api/v1/pipeline-runs/today/export.csv", s.handleExport)
+	mux.HandleFunc("GET /api/v1/config", s.handleConfig)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	return withSQLRequest(mux)
+}
+
+// handleConfig gives the page the settings it needs that are not report data,
+// such as the RT base URL that ticket ids link to.
+func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, map[string]string{"rt_url": s.rtURL})
 }
 
 // window fixes "today" and "now" on the server clock, never the browser's.
@@ -43,7 +51,7 @@ func (s *Server) window() Window {
 }
 
 // handleToday serves the summary and one list measured at one instant, which
-// is what the page polls every 15 seconds. The list is the live in-progress
+// is what the page loads on open and on each Refresh click. The list is the live in-progress
 // one ("in_progress"), or with ?case= the runs behind another card ("runs").
 func (s *Server) handleToday(w http.ResponseWriter, r *http.Request) {
 	f, limit, ok := listParams(w, r)
@@ -55,8 +63,8 @@ func (s *Server) handleToday(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown case", http.StatusBadRequest)
 		return
 	}
-	// A card click (?summary=0) reloads only that case's list; the cards
-	// catch up on the next poll.
+	// ?summary=0 reloads only that case's list (the page itself always asks
+	// for the summary too, so its cards and list match).
 	if c != CaseInProgress && r.URL.Query().Get("summary") == "0" {
 		s.handleCaseOnly(w, r, c, limit)
 		return

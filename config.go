@@ -15,6 +15,7 @@ import (
 const (
 	defaultAddr        = ":8090"
 	defaultNOCQueue    = "Network Operation Center (NOC)"
+	defaultRTURL       = "http://localhost:8084"
 	defaultStuckMin    = 10
 	defaultLimit       = 50
 	maxLimit           = 200
@@ -24,8 +25,11 @@ const (
 )
 
 type Config struct {
-	Addr         string
-	NOCQueue     string
+	Addr     string
+	NOCQueue string
+	// RTURL is the RT web base the page links ticket ids to
+	// (<RTURL>/Ticket/Display.html?id=<id>).
+	RTURL        string
 	Location     *time.Location
 	StuckMinutes int
 	// LogSQL logs every query with its arguments filled in.
@@ -73,6 +77,7 @@ func LoadConfig(envPath string) (Config, error) {
 	cfg := Config{
 		Addr:     get("REPORT_HTTP_ADDR", defaultAddr),
 		NOCQueue: get("REPORT_NOC_QUEUE", defaultNOCQueue),
+		RTURL:    strings.TrimRight(get("REPORT_RT_URL", defaultRTURL), "/"),
 		DB: DBConfig{
 			Host:     get("MYSQL_DB_HOST", ""),
 			Port:     get("MYSQL_DB_PORT", "3306"),
